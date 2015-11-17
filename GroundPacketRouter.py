@@ -34,7 +34,7 @@ DEVELOPMENT HISTORY:
 import os
 from PUSService import *
 from datetime import *
-from multiprocessing import Process, Lock
+from multiprocessing import *
 
 class groundPacketRouter(Process):
 	"""
@@ -78,21 +78,29 @@ def initialize(self):
 	os.mkfifo("/fifos/GPRtofdir.fifo")
 	self.GPRTofdirFifo = open("/fifos/GPRtofdir.fifo", "wb")
 	# Create all the files required for logging
+	self.eventLog = None
+	self.hkLog = None
 	eventPath = "/events/eventLog.%s.%s" %currentTime.month, %currentTime.day
 	if os.path.exists(eventPath):
-		eventLog = open(eventPath, "r+")
+		self.eventLog = open(eventPath, "r+")
 	else:
-		eventLog = open(eventPath, "w")
+		self.eventLog = open(eventPath, "w")
 	hkPath = "/hk_logs/hkLog.%s.%s" %currentTime.month, %currentTime.day
 	if os.path.exists(hkPath):
-		hkLog = open(hkPath, "r+")
+		self.hkLog = open(hkPath, "r+")
 	else:
-		hkLog = open(hkPath, "w")
+		self.hkLog = open(hkPath, "w")
+
+	# Create Mutex locks for accessing logs and printing to the CLI.
+	self.hkLock = Lock()
+	self.eventLock = Lock()
+	self.cliLock = Lock()
 
 	# Create all the required PUS Services
-	self.HKGroundService = PUSService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", eventPath, hkPath, absTime.day, absTime.minute, absTime.minute, absTime.second, self.hkService)
-	self.MemoryGroundService = PUSService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", eventPath, hkPath, absTime.day, absTime.minute, absTime.minute, absTime.second, self.memService)
-	self.FDIRGround = PUSService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", eventPath, hkPath, absTime.day, absTime.minute, absTime.minute, absTime.second, self.fdirService)
+	self.HKGroundService = PUSService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", eventPath, hkPath, self.eventLock, self.hkLock, self.cliLock, absTime.day, absTime.minute, absTime.minute, absTime.second, self.hkService)
+	self.MemoryGroundService = PUSService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", eventPath, hkPath, self.eventLock, self.hkLock, self.cliLock, absTime.day, absTime.minute, absTime.minute, absTime.second, self.memService)
+	self.FDIRGround = PUSService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", eventPath, hkPath, self.eventLock, self.hkLock, self.cliLock, absTime.day, absTime.minute, absTime.minute, absTime.second, self.fdirService)
+
 
 	# TO-DO: Create 3 new classes which are subclasses of PUS Service
 
@@ -170,4 +178,3 @@ if __name__ == '__main__':
 	x = groundPacketRouter()
 	x.start()
 	x.stop()
-	

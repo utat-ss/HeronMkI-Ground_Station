@@ -23,7 +23,7 @@ DEVELOPMENT HISTORY:
 """
 
 import os
-from multiprocessing import Process, Lock
+from multiprocessing import *
 
 class PUSService(Process):
 	"""
@@ -37,7 +37,7 @@ def clearCurrentCommand(self):
 	return
 
 @classmethod
-def logEventReport(severity, reportID, param1, param0, hour, minute):
+def logEventReport(severity, reportID, param1, param0, day, hour, minute):
 	"""
 	@purpose: This method writes a event report to the event log.
 	@param: severity: 1 = Normal, 2-4 = different levels of failure
@@ -45,9 +45,21 @@ def logEventReport(severity, reportID, param1, param0, hour, minute):
 	@param: param1,0: extra information sent from the satellite.
 	"""
 	# Event logs include time, which may have come from the satellite.
+	self.eventLock.acquire()
+	self.eventLog.write(str(day) + "/" + str(hour) + "/" + str(minute) + "\t,\t")
+	self.eventLog.write(str(severity) + "\t,\t")
+	self.eventLog.write(str(reportID) + "\t,\t")
+	self.eventLog.write(str(param1) + "\t,\t")
+	self.eventLog.write(str(param0) + "\t,\n")
+	self.eventLock.release()
 
+@classmethod
+def printToCLI(stuff):
+	self.cliLock.acquire()
+	print(str(stuff))
+	self.cliLock.release()
 
-def __init__(self, path1, path2, eventPath, hkPath, day, hour, minute, second, type):
+def __init__(self, path1, path2, eventPath, hkPath, eventLock, hkLock, cliLock, day, hour, minute, second, type):
 	"""
 	@purpose: Initialization method for the PUS service class.
 	@param: path1: path to the file being used as a one-way fifo TO this PUS Service Instance
@@ -104,7 +116,10 @@ def __init__(self, path1, path2, eventPath, hkPath, day, hour, minute, second, t
 	# Files to be used for logging and housekeeping
 	self.eventLog = open(eventPath, a+)
 	self.hkLog = open(hkPath, a+)
+	# Mutex Locks for accessing logs and the CLI
+	self.eventLock = eventLock
+	self.hkLock = hkLock
+	self.cliLock = cliLock
 
 if __name__ == '__main__':
 	return
-	
