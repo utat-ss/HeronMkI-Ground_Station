@@ -10,6 +10,8 @@ FILE REFERENCES: 	PUSService.py,
 
 LIBRARIES USED:		os, datetime, multiprocessing
 
+SUPERCLASS:			Process
+
 ABNORMAL TERMINATION CONDITIONS, ERROR AND WARNING MESSAGES: None yet.
 
 ASSUMPTIONS, CONSTRAINTS, CONDITIONS: None.
@@ -42,11 +44,10 @@ class groundPacketRouter(Process):
 	Acts as the main packet router for PUS packets to/from the groundstation
 	as well as the CLI.
 	Creates other processes which are used to manage PUS services.
-
 	"""
 
 @classmethod
-def start(self):
+def run(self):
 	"""
 	@purpose: Represents the main program for the ground packet router.
 	"""	
@@ -56,7 +57,8 @@ def start(self):
 		# Check the transceiver for an incoming packet
 		# Update FIFOs
 		# Check FIFOs for a required action
-
+		# Check the CLI for required action / print to the CLI
+		# Update the current time stored in the processes.
 def initialize(self):
 
 	absTime = datetime.timedelta(0)	# Set the absolute time to zero.
@@ -80,26 +82,39 @@ def initialize(self):
 	# Create all the files required for logging
 	self.eventLog = None
 	self.hkLog = None
+	self.errorLog = None
 	eventPath = "/events/eventLog.%s.%s" %currentTime.month, %currentTime.day
 	if os.path.exists(eventPath):
-		self.eventLog = open(eventPath, "r+")
+		self.eventLog = open(eventPath, "rb+")
 	else:
-		self.eventLog = open(eventPath, "w")
-	hkPath = "/hk_logs/hkLog.%s.%s" %currentTime.month, %currentTime.day
+		self.eventLog = open(eventPath, "wb")
+	hkPath = "/housekeeping/logs/hkLog.%s.%s" %currentTime.month, %currentTime.day
 	if os.path.exists(hkPath):
-		self.hkLog = open(hkPath, "r+")
+		self.hkLog = open(hkPath, "rb+")
 	else:
-		self.hkLog = open(hkPath, "w")
+		self.hkLog = open(hkPath, "wb")
+	errorPath = "/errors/errorLog.%s.%s" %currentTime.month, %currentTime.day
+	if os.path.exists(errorPath):
+		self.errorLog = open(errorPath, "rb+")
+	else:
+		self.errorLog = open(errorPath, "wb")
 
 	# Create Mutex locks for accessing logs and printing to the CLI.
 	self.hkLock = Lock()
 	self.eventLock = Lock()
 	self.cliLock = Lock()
+	self.errorLock = Lock()
 
 	# Create all the required PUS Services
-	self.HKGroundService = PUSService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", eventPath, hkPath, self.eventLock, self.hkLock, self.cliLock, absTime.day, absTime.minute, absTime.minute, absTime.second, self.hkService)
-	self.MemoryGroundService = PUSService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", eventPath, hkPath, self.eventLock, self.hkLock, self.cliLock, absTime.day, absTime.minute, absTime.minute, absTime.second, self.memService)
-	self.FDIRGround = PUSService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", eventPath, hkPath, self.eventLock, self.hkLock, self.cliLock, absTime.day, absTime.minute, absTime.minute, absTime.second, self.fdirService)
+	self.HKGroundService 		= PUSService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
+												absTime.day, absTime.minute, absTime.minute, absTime.second)
+	self.HKPID = self.HKGroundService.pid
+	self.MemoryGroundService 	= PUSService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
+												absTime.day, absTime.minute, absTime.minute, absTime.second)
+	self.memPID = self.MemoryGroundService.pid
+	self.FDIRGround 			= PUSService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
+												absTime.day, absTime.minute, absTime.minute, absTime.second)
+	seld.FDIRPID = self.FDIRGround.pid
 
 
 	# TO-DO: Create 3 new classes which are subclasses of PUS Service
@@ -112,7 +127,6 @@ def initialize(self):
 	# ...
 	return
 
-
 @classmethod
 def stop(self):
 	# Close all the files which were opened
@@ -122,6 +136,24 @@ def stop(self):
 	self.GPRTomemFifo.close()
 	self.fdirToGPRFifo.close()
 	self.GPRTofdirFifo.close()
+
+	# Kill all the children
+	if(self.HKGroundService.is_alive()):
+		self.HKGroundService.terminate()
+	if(self.MemoryGroundService.is_alive()):
+		self.MemoryGroundService.terminate()
+	if(self.FDIRGround.is_alive()):
+		self.FDIRGround.terminate()
+
+	# Delete all the FIFO files that were created
+	os.remove("/fifos/hkToGPR.fifo")
+	os.remove("/fifos/GPRtohk.fifo")
+	os.remove("/fifos/memToGPR.fifo")
+	os.remove("/fifos/GPRtomem.fifo")
+	os.remove("/fifos/GPRtomem.fifo")
+	os.remove("/fifos/fdirToGPR.fifo")
+	os.remove("/fifos/GPRtofdir.fifo")
+	return
 
 
 def __init__(self):
@@ -177,4 +209,4 @@ def __init__(self):
 if __name__ == '__main__':
 	x = groundPacketRouter()
 	x.start()
-	x.stop()
+	x.terminate()
