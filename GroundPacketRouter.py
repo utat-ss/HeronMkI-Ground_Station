@@ -3,10 +3,11 @@ FILE_NAME:			GroundPacketRouter.py
 
 AUTHOR:				Keenan Burnett
 
-PURPOSE:			this program is meant to start all other ground station software and
+PURPOSE:			This program is meant to start all other ground station software and
 					act as the interface between subsidiary services and the CLI / transceiver.
 
-FILE REFERENCES: 	PUSService.py, 
+FILE REFERENCES: 	PUSService.py, HKService.py, MemorySerice.py, FDIRService.py
+	(We write to logs located in /events /errors and /housekeeping)
 
 LIBRARIES USED:		os, datetime, multiprocessing
 
@@ -30,11 +31,14 @@ REQUIREMENTS:
 DEVELOPMENT HISTORY:
 11/16/2015			Created.
 
+11/17/2015			I am adding the decode_telemetry() function.
+
 """
 
 
 import os
 from PUSService import *
+from HKService import *
 from datetime import *
 from multiprocessing import *
 
@@ -49,7 +53,7 @@ class groundPacketRouter(Process):
 @classmethod
 def run(self):
 	"""
-	@purpose: Represents the main program for the ground packet router.
+	@purpose: Represents the main program for the ground packet router and Command-Line Interface.
 	"""	
 	self.initialize()
 
@@ -60,8 +64,13 @@ def run(self):
 		# Check the CLI for required action / print to the CLI
 		# Update the current time stored in the processes.
 def initialize(self):
-
-	absTime = datetime.timedelta(0)	# Set the absolute time to zero.
+	"""
+	@purpose: 	-Handles all file creation such as logs, fifos.
+				-Synchronizes time with the satellite.
+				-Initializes mutex locks
+				-Creates subsidiary services for: housekeeping, memory management, failure detection isolation & recovery (FDIR)
+	"""	
+	absTime = datetime.timedelta(0)	# Set the absolute time to zero. (for now)
 	currentTime = datetime.date()
 
 	"""Get the absolute time from the satellite and update ours."""
@@ -93,7 +102,7 @@ def initialize(self):
 		self.hkLog = open(hkPath, "rb+")
 	else:
 		self.hkLog = open(hkPath, "wb")
-	errorPath = "/errors/errorLog.%s.%s" %currentTime.month, %currentTime.day
+	errorPath = "/ground_errors/errorLog.%s.%s" %currentTime.month, %currentTime.day
 	if os.path.exists(errorPath):
 		self.errorLog = open(errorPath, "rb+")
 	else:
@@ -106,7 +115,7 @@ def initialize(self):
 	self.errorLock = Lock()
 
 	# Create all the required PUS Services
-	self.HKGroundService 		= PUSService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
+	self.HKGroundService 		= hkService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
 												absTime.day, absTime.minute, absTime.minute, absTime.second)
 	self.HKPID = self.HKGroundService.pid
 	self.MemoryGroundService 	= PUSService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
@@ -116,16 +125,19 @@ def initialize(self):
 												absTime.day, absTime.minute, absTime.minute, absTime.second)
 	seld.FDIRPID = self.FDIRGround.pid
 
-
-	# TO-DO: Create 3 new classes which are subclasses of PUS Service
-
-	# Then we simply have to create them here and execute their start() method.
-
-	# Create Mutex logs for communicating with logs and the CLI.
-
-
-	# ...
 	return
+
+def decode_telemetry(self):
+	"""
+	@purpose:   This method will decode the telemetry packet which was sent by the satellite
+				(located in current_tm[]). It will either send the appropriate commands
+				to the subsidiary services or it will act on the telemetry itself (if it is valid).
+				For now, we will log all telemtry for safe-keeping / debugging.
+	"""	
+
+
+	return
+
 
 @classmethod
 def stop(self):
