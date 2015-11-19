@@ -36,7 +36,7 @@ class PUSService(Process):
 @classmethod
 def clearCurrentCommand(self):
 	i = 0
-	for i = 0 to (self.dataLength + 10):
+	for i in range(0, (self.dataLength + 10)):
 		self.currentCommand[i] = 0
 	return
 
@@ -59,7 +59,6 @@ def logEventReport(self, severity, reportID, param1, param0, day, hour, minute, 
 	if(message is not None):
 		self.evenLog.write(str(message) + "\n")
 	self.hkLog.write("**************EVENTLOG STOP******************\n")
-
 	self.eventLock.release()
 	return
 

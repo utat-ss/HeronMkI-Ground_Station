@@ -56,12 +56,12 @@ def run(self):
 
 def initialize(self):
 	tempString = None
-	for i = 0 to self.dataLength:
+	for i in range(0, self.dataLength):
 		self.currentHK[i] = 0
 		self.currentHKDefinition[i] = 0
 		self.hkDefinition0[i] = 0
 		self.hkDefinition1[i] = 0
-	for i = 0 to (self.dataLength + 10):
+	for i in range(0, (self.dataLength + 10)):
 		self.currentCommand[i] = 0
 
 	self.setHKDefinitionsDefault()
@@ -80,10 +80,10 @@ def setHKDefinitionsDefault(self):
 	self.hkDefinition0[136] 	= 0
 	self.hkDefinition0[135] 	= self.collectionInterval0
 	self.hkDefinition0[134] 	= self.numParameters0
-	for i = 0 to (self.numVars0 - 1):
+	for i in range(0, self.numVars0):
 		self.hkDefinition0[i] = paramNum - i
 		paramNum = 1
-	for i = self.numVars0 to (self.numParameters0 - 1):
+	for i in range (self.numVars0, self.numParameters0):
 		self.hkDefinition0[i] = paramNum
 		paramNum++
 	self.currenthkdefinitionf = 0
@@ -95,7 +95,7 @@ def setHKDefinitionsDefault(self):
 		hkdef.write(str(0))
 		hkdef.write(str(self.collectionInterval0))
 		hkdef.write(str(self.numParameters0))
-		for i = (self.numParameters0 * 2 - 1 ) to 0:
+		for i in range((self.numParameters0 * 2 - 1 ), 0, -1):
 			paramNum = self.hkDefinition0[i]
 			hkdef.write(self.parameters[paramNum])
 
@@ -124,7 +124,7 @@ def setAlternateHKDefinition(self):
 		self.hkDefinition1[134] = self.numParameters1
 		hkdef.seek(3)
 		# Read the housekeeping definition from the file.
-		for i = (self.numParameters1 * 2 - 1 ) to 0:
+		for i in range((self.numParameters1 * 2 - 1 ), 0, -1):
 			tempString = hkdef.readline()
 			tempString = tempString.rstrip()
 			paramNum = int(self.invParameters(tempString))
