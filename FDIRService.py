@@ -38,9 +38,9 @@ class FDIRService(PUSService):
 		# This is where the actual program goes.
 
 
-def __init__(self, path1, path2, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second, type):
+def __init__(self, path1, path2, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second):
 	# Inititalize this instance as a PUS service
-	super(hkService, self).__init__(path1, path2, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second)
+	super(FDIRService, self).__init__(path1, path2, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second)
 
 if __name__ == '__main__':
 	return

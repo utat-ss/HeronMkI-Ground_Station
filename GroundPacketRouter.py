@@ -18,8 +18,7 @@ ABNORMAL TERMINATION CONDITIONS, ERROR AND WARNING MESSAGES: None yet.
 ASSUMPTIONS, CONSTRAINTS, CONDITIONS: None.
 
 NOTES:
-		- Need to add method which will update the ground time based on the received
-		- satellite time (after doing a couple checks)
+		- Need to update logEventReport so that it prints different stuff depending on the severity.
 
 REQUIREMENTS:
 	-Python 2.7
@@ -35,7 +34,7 @@ DEVELOPMENT HISTORY:
 
 11/17/2015			I am adding the decode_telemetry() function.
 
-11/18/2015			Finishing decodeTelemtry(), decodeTelemtry(), verifyTelemetry(), 
+11/18/2015			Finished decodeTelemtry(), decodeTelemtry(), verifyTelemetry().
 
 """
 
@@ -67,6 +66,7 @@ def run(self):
 		# Check FIFOs for a required action
 		# Check the CLI for required action / print to the CLI
 		# Update the current time stored in the processes.
+		# Make sure all te subsidiary services are still running
 def initialize(self):
 	"""
 	@purpose: 	-Handles all file creation such as logs, fifos.
@@ -94,6 +94,10 @@ def initialize(self):
 	self.fdirToGPRFifo = open("/fifos/fdirToGPR.fifo", "rb")
 	os.mkfifo("/fifos/GPRtofdir.fifo")
 	self.GPRTofdirFifo = open("/fifos/GPRtofdir.fifo", "wb")
+	os.mkfifo("/fifos/GPRTosched.fifo")
+	self.GPRtoschedFifo = open("/fifos/GPRTosched.fifo")
+	os.mkfifo("/fifos/schedToGPR.fifo")
+	self.schedToGPRFifo = open("/fifos/schedToGPR.fifo")
 	# Create all the files required for logging
 	self.eventLog = None
 	self.hkLog = None
@@ -124,15 +128,44 @@ def initialize(self):
 	self.HKGroundService 		= hkService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
 												absTime.day, absTime.minute, absTime.minute, absTime.second)
 	self.HKPID = self.HKGroundService.pid
-	self.MemoryGroundService 	= PUSService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
+	self.MemoryGroundService 	= MemoryService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
 												absTime.day, absTime.minute, absTime.minute, absTime.second)
 	self.memPID = self.MemoryGroundService.pid
-	self.FDIRGround 			= PUSService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
+	self.FDIRGround 			= FDIRService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
 												absTime.day, absTime.minute, absTime.minute, absTime.second)
 	seld.FDIRPID = self.FDIRGround.pid
+	self.schedulingGround		= schedulingService("/fifos/schedToGPR.fifo", "/fifos/GPRtosched.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
+												absTime.day, absTime.minute, absTime.minute, absTime.second)
 
 	return
 
+def tcVerificationDecode(self):
+	"""
+	@purpose:   This method is used when the PUS packet which was received is a TC
+				verification packet. 
+				The intent here is to route the packet to the subsidiary service that
+				it is intended for (TC Acceptance Report) OR to log the verification
+				to the Event Log / Alert FDIR (TC Execution Report)
+	"""	
+	verificationAPID = 0
+	verificationPacketID = currentCommand[135] << 8
+	verificationPacketID += currentCommand[134]
+	verificationPSC	= currentCommand[133] << 8
+	verificationPSC += currentCommand[132]
+	if(self.serviceTypeRx == 1):
+		verificationAPID = currentCommand[135]
+		currentCommand[146] = 1
+		if(verificationAPID == self.hkTaskID):
+			self.sendCurrentCommandToFifo(self.GPRTohkFifo)			# Send the TC Acceptance Report to the housekeeping service.
+		if(verificationAPID == self.MemoryTaskID):
+			self.sendCurrentCommandToFifo(self.GPRTomemFifo)
+		if(verificationAPID == self.schedulingTaskID):
+			self.sendCurrentCommandToFifo(self.GPRtoschedFifo)
+		if(verificationAPID == self.FDIRGroundID):
+			self.sendCurrentCommandToFifo(self.GPRTofdirFifo)
+	if(self.serviceTypeRx == 2)
+		self.logEventReport(2, self.TMExecutionFailed, 0, 0, "Telecommand Execution Failed. for PacketID: %s, PSC: %s" %str(verificationPacketID) % str(verificationPSC))
+	return
 
 # Each element of the tmToDecode array needs to be an integer
 def decodeTelemetry(self):
@@ -202,15 +235,15 @@ def decodeTelemetrH(self):
 		# If TC Acceptance verification, route to the corresponding service
 		# Else if TC Execution verification, make a note of it in the event log.
 	if(self.serviceTypeRx == self.hkService):
-		currentCommand[146] = self.hkService
+		currentCommand[146] = self.serviceSubTypeRx
 		currentCommand[145] = currentCommand[135]
 		currentCommand[144] = currentCommand[134]
 		self.sendCurrentCommandToFifo(self.GPRTohkFifo)
 	if(self.serviceTypeRx == self.timeService):
 		# Synch Time With satellite here.
 	if(self.serviceTypeRx == self.kService):
-		currentCommand[146] = self.memService
-		self.sendCurrentCommandToFifo(self.GPRTomemFifo)
+		currentCommand[146] = self.serviceSubTypeRx
+		self.sendCurrentCommandToFifo(self.GPRToschedFifo)
 	if(self.serviceTypeRx == self.eventReportService):
 		# Store the received event in the eventLog, check if the event was an error.
 	if(self.serviceTypeRx == self.memService):
@@ -257,6 +290,12 @@ def verifyTelemetry(self):
 		self.printToCLI("Incoming Telemetry Packet Failed\n")
 		self.logError("TM PacketID: %s, PSC: %s had an incorrect serviceType" %str(self.packetID) %str(self.psc))
 		return -1
+
+	if(self.serviceTypeRx == self.tcVerifyService):
+		if((self.serviceSubTypeRx != 1) && (self.serviceSubTypeRx != 2) && (self.serviceSubTypeRx != 7) && (self.serviceSubTypeRx != 8)):
+			self.printToCLI("Incoming Telemetry Packet Failed\n")
+			self.logError("TM PacketID: %s, PSC: %s had an incorrect serviceSubType" %str(self.packetID) %str(self.psc))
+			return -1
 
 	if(self.serviceTypeRx == self.hkService):
 		if((self.serviceSubTypeRx != 10) && (self.serviceSubTypeRx != 12) && (self.serviceSubTypeRx != 25) && (self.serviceSubTypeRx != 26)):
@@ -306,7 +345,7 @@ def verifyTelemetry(self):
 			self.printToCLI("Incoming Telemetry Packet Failed\n")
 			self.logError("TM PacketID: %s, PSC: %s had an incorrect serviceSubType" %str(self.packetID) %str(self.psc))
 			return -1
-		if(self.apid != self.MemGroundID):
+		if(self.apid != self.schedGroundID):
 			self.printToCLI("Incoming Telemetry Packet Failed\n")
 			self.logError("TM PacketID: %s, PSC: %s had an invalid APID" %str(self.packetID) %str(self.psc))
 			return -1
@@ -324,7 +363,7 @@ def verifyTelemetry(self):
 		self.logError("TM PacketID: %s, PSC: %s had an incorrect packet version" %str(self.packetID) %str(self.psc))
 		return -1
 
-	self.logEventReport(1, self.incomTMSuccess, 0, 0, currentTime.day, currentTime.hour, currentTime.minute, "Incoming Telemetry Packet Succeeded")
+	self.logEventReport(1, self.incomTMSuccess, 0, 0, "Incoming Telemetry Packet Succeeded")
 	return 1
 
 
@@ -368,6 +407,8 @@ def stop(self):
 		self.MemoryGroundService.terminate()
 	if(self.FDIRGround.is_alive()):
 		self.FDIRGround.terminate()
+	if(self.schedulingGround.as_alive()):
+		self.schedulingGround.terminate()
 
 	# Delete all the FIFO files that were created
 	os.remove("/fifos/hkToGPR.fifo")
@@ -377,10 +418,12 @@ def stop(self):
 	os.remove("/fifos/GPRtomem.fifo")
 	os.remove("/fifos/fdirToGPR.fifo")
 	os.remove("/fifos/GPRtofdir.fifo")
+	os.remove("/fifos/GPRTosched.fifo")
+	os.remove("/fifos/schedToGPR.fifo")
 	return
 
 @classmethod
-def logEventReport(self, severity, reportID, param1, param0, day, hour, minute, message=None):
+def logEventReport(self, severity, reportID, param1, param0, message=None):
 	"""
 	@purpose: This method writes a event report to the event log.
 	@param: severity: 1 = Normal, 2-4 = different levels of failure
@@ -390,7 +433,7 @@ def logEventReport(self, severity, reportID, param1, param0, day, hour, minute, 
 	# Event logs include time, which may have come from the satellite.
 	self.eventLock.acquire()
 	self.hkLog.write("**************EVENTLOG START*****************\n")
-	self.eventLog.write(str(day) + "/" + str(hour) + "/" + str(minute) + "\t,\t")
+	self.eventLog.write(str(self.currentTime.day) + "/" + str(self.currentTime.hour) + "/" + str(self.currentTime.minute) + "\t,\t")
 	self.eventLog.write(str(severity) + "\t,\t")
 	self.eventLog.write(str(reportID) + "\t,\t")
 	self.eventLog.write(str(param1) + "\t,\t")
@@ -484,6 +527,7 @@ def __init__(self):
 	self.memgroundinitialized	= 0xFE
 	self.fdirgroundinitialized  = 0xFD
 	self.incomTMSuccess			= 0xFC
+	self.TMExecutionFailed		= 0xFB
 	# IDs for Communication:
 	self.comsID					= 0x00
 	self.epsID					= 0x01
@@ -505,6 +549,7 @@ def __init__(self):
 	seld.MemGroundID			= 0x12
 	self.GroundPacketRouterID	= 0x13
 	self.FDIRGroundID			= 0x14
+	self.schedGroundID		= 0x15
 	# Global Variables for Time
 	self.abs_day				= day
 	self.abs_hour				= hour
