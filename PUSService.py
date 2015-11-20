@@ -28,6 +28,7 @@ DEVELOPMENT HISTORY:
 
 import os
 from multiprocessing import *
+from datetime import *
 
 class PUSService(Process):
 	"""
@@ -35,13 +36,16 @@ class PUSService(Process):
 	"""
 @classmethod
 def clearCurrentCommand(self):
+	"""
+	@purpose:   Clears the array currentCommand[]
+	"""	
 	i = 0
 	for i in range(0, (self.dataLength + 10)):
 		self.currentCommand[i] = 0
 	return
 
 @classmethod
-def logEventReport(self, severity, reportID, param1, param0, day, hour, minute, message=None):
+def logEventReport(self, severity, reportID, param1, param0, message=None):
 	"""
 	@purpose: This method writes a event report to the event log.
 	@param: severity: 1 = Normal, 2-4 = different levels of failure
@@ -49,32 +53,52 @@ def logEventReport(self, severity, reportID, param1, param0, day, hour, minute, 
 	@param: param1,0: extra information sent from the satellite.
 	"""
 	# Event logs include time, which may have come from the satellite.
+	tempString  = None
+	if severity == 1:
+		tempString = "NORMAL REPORT (SEV 1)\t"
+	if severity == 2:
+		tempString = "ERROR  REPORT (SEV 2)\t"
+	if severity == 3:
+		tempString = "ERROR  REPORT (SEV 3)\t" 
+	if severity == 4:
+		tempString = "ERROR  REPORT (SEV 4)\t" 
 	self.eventLock.acquire()
-	self.hkLog.write("**************EVENTLOG START*****************\n")
-	self.eventLog.write(str(day) + "/" + str(hour) + "/" + str(minute) + "\t,\t")
+	self.evenLog.write(tempString)
+	self.eventLog.write(str(self.absTime.day) + "/" + str(self.absTime.hour) + "/" + str(self.absTime.minute) + "\t,\t")
 	self.eventLog.write(str(severity) + "\t,\t")
 	self.eventLog.write(str(reportID) + "\t,\t")
 	self.eventLog.write(str(param1) + "\t,\t")
-	self.eventLog.write(str(param0) + "\t,\n")
+	self.eventLog.write(str(param0) + "\t,\t")
 	if(message is not None):
 		self.evenLog.write(str(message) + "\n")
-	self.hkLog.write("**************EVENTLOG STOP******************\n")
+	if(message is None):
+		self.eventLog.write("\n")
 	self.eventLock.release()
 	return
 
 @classmethod
-def logHKReport(*hkArray, day, hour, minute):
+def logHKReport(self, *hkArray):
+	"""
+	@purpose:   Used to log the housekeeping report which was received.
+	@Note:		Contains a mutex lock for exclusive access.
+	@Note:		Housekeeping reports are created in a manner that is more convenient
+				for excel or Matlab to parse but not really that great for human consumption.
+	"""	
 	self.hkLock.acquire()
-	self.hkLog.write("***********HOUSEKEEPING START****************\n")
-	self.hkLog.write(str(day) + "/" + str(hour) + "/" + str(minute) + "\n")
+	self.hkLog.write("HKLOG:\t")
+	self.hkLog.write(str(self.absTime.day) + "/" + str(self.absTime.day) + "/" + str(self.absTime.day) + "\t,\t")
 	for byte in hkArray:
-		self.hkLog.write(str(byte) + "\n")
-	self.hkLog.write("***********HOUSEKEEPING STOP*****************\n")
+		byte = byte & 0x000000FF
+		self.hkLog.write(str(byte) + "\t,\t")
+	self.hkLog.write("\n")
 	self.hkLock.release()
 	return
 
 @classmethod
 def logError(self, errorString):
+	"""
+	@purpose:   Used to log an error report (ground errors), contains a mutex lock for exclusive access.
+	"""	
 	self.errorLock.acquire()
 	self.errorLog.write("******************ERROR START****************\n")
 	self.errorLog.write("ERROR: " + str(errorString) + " \n")
@@ -83,6 +107,9 @@ def logError(self, errorString):
 
 @classmethod
 def printToCLI(self, stuff):
+	"""
+	@purpose:   Used to print something to the CLI, contains a mutex lock for exclusive access.
+	"""	
 	self.cliLock.acquire()
 	print(str(stuff))
 	self.cliLock.release()
@@ -142,6 +169,11 @@ def __init__(self, path1, path2, eventPath, hkPath, errorPath, eventLock, hkLock
 	self.hkgroundinitialized	= 0xFF
 	self.memgroundinitialized	= 0xFE
 	self.fdirgroundinitialized  = 0xFD
+	self.incomTMSuccess			= 0xFC
+	self.TMExecutionFailed		= 0xFB
+	self.timeReportReceived		= 0xFA
+	self.timeOutOfSync			= 0xF9
+	self.hkparamincorrect		= 0xF8
 	# IDs for Communication:
 	self.comsID					= 0x00
 	self.epsID					= 0x01
@@ -213,10 +245,11 @@ def __init__(self, path1, path2, eventPath, hkPath, errorPath, eventLock, hkLock
 	self.invParameters = {v : k for k,v in self.parameters.items()}
 
 	# Global Variables for Time
-	self.abs_day				= day
-	self.abs_hour				= hour
-	self.abs_minute				= minute
-	self.abs_second				= second
+	self.absTime 					= datetime.timedelta(0)
+	self.absTime.day				= day
+	self.absTime.day				= hour
+	self.absTime.minute				= minute
+	self.absTime.second				= second
 	# Files to be used for logging and housekeeping
 	self.eventLog = open(eventPath, a+)						# Open the logs for appending
 	self.hkLog = open(hkPath, a+)

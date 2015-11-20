@@ -37,7 +37,12 @@ class schedulingService(PUSService):
 	"""
 	@classmethod
 	def run(self):
-		# This is where the actual program goes.
+	"""
+	@purpose:   Used to house the main program for the scheduling service.
+	@Note:		Since this class is a subclass of Process, when self.start() is executed on an 
+				instance of this class, a process will be created with the contents of run() as the 
+				main program.
+	"""	
 
 
 def __init__(self, path1, path2, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second):

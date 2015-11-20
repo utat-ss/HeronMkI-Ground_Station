@@ -61,11 +61,11 @@ def run(self):
 	self.initialize()
 
 	while(1):
-		# Check the transceiver for an incoming packet
-		# Update FIFOs
+		# Check the transceiver for an incoming packet THIS NEEDS TO PUT INCOMING TELEMETRY
+		decodeTelemetry()
 		# Check FIFOs for a required action
-		# Check the CLI for required action / print to the CLI
-		# Update the current time stored in the processes.
+		# Check the CLI for required action
+		updateServiceTime()
 		# Make sure all te subsidiary services are still running
 def initialize(self):
 	"""
@@ -74,8 +74,9 @@ def initialize(self):
 				-Initializes mutex locks
 				-Creates subsidiary services for: housekeeping, memory management, failure detection isolation & recovery (FDIR)
 	"""	
-	absTime = datetime.timedelta(0)	# Set the absolute time to zero. (for now)
-	currentTime = datetime.date()
+	self.absTime = datetime.timedelta(0)	# Set the absolute time to zero. (for now)
+	self.oldAbsTime = self.absTime
+	self.currentTime = datetime.date()
 
 	self.clearCurrentCommand()
 
@@ -101,18 +102,24 @@ def initialize(self):
 	# Create all the files required for logging
 	self.eventLog = None
 	self.hkLog = None
+	self.hkDefLog = None
 	self.errorLog = None
-	eventPath = "/events/eventLog.%s.%s" %currentTime.month, %currentTime.day
+	eventPath = "/events/eventLog%s%s.csv" %currentTime.month, %currentTime.day
 	if os.path.exists(eventPath):
 		self.eventLog = open(eventPath, "rb+")
 	else:
 		self.eventLog = open(eventPath, "wb")
-	hkPath = "/housekeeping/logs/hkLog.%s.%s" %currentTime.month, %currentTime.day
+	hkPath = "/housekeeping/logs/hkLog%s%s.csv" %currentTime.month, %currentTime.day
 	if os.path.exists(hkPath):
 		self.hkLog = open(hkPath, "rb+")
 	else:
 		self.hkLog = open(hkPath, "wb")
-	errorPath = "/ground_errors/errorLog.%s.%s" %currentTime.month, %currentTime.day
+	hkDefPath = "/housekeeping/logs/hkDefLog%s%s.txt" %currentTime.month, %currentTime.day
+	if os.path.exists(hkDefPath):
+		self.hkDefLog = open(hkDefPath, "rb+")
+	else:
+		self.hkDefLog  = open(hkDefPath, "wb")
+	errorPath = "/ground_errors/errorLog%s%s.txt" %currentTime.month, %currentTime.day
 	if os.path.exists(errorPath):
 		self.errorLog = open(errorPath, "rb+")
 	else:
@@ -126,35 +133,46 @@ def initialize(self):
 
 	# Create all the required PUS Services
 	self.HKGroundService 		= hkService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
-												absTime.day, absTime.minute, absTime.minute, absTime.second)
+												absTime.day, absTime.minute, absTime.minute, absTime.second, hkDefPath)
 	self.HKPID = self.HKGroundService.pid
 	self.MemoryGroundService 	= MemoryService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
 												absTime.day, absTime.minute, absTime.minute, absTime.second)
 	self.memPID = self.MemoryGroundService.pid
 	self.FDIRGround 			= FDIRService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
 												absTime.day, absTime.minute, absTime.minute, absTime.second)
-	seld.FDIRPID = self.FDIRGround.pid
+	self.FDIRPID = self.FDIRGround.pid
 	self.schedulingGround		= schedulingService("/fifos/schedToGPR.fifo", "/fifos/GPRtosched.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
 												absTime.day, absTime.minute, absTime.minute, absTime.second)
-
+	self.schedPID = self.schedulingGround.pid
 	return
 
-def tcVerificationDecode(self):
+def updateServiceTime():
 	"""
-	@purpose:   This method is used when the PUS packet which was received is a TC
+	@purpose:   Whenever possible, GroundPacketRouter should update the time stored in the subsidiary services 
+				so that everything stays in sync.
+	"""	
+	self.HKGroundService.absTime = self.absTime
+	self.MemoryGroundService.absTime = self.absTime
+	self.FDIRGround.absTime = self.absTime
+	seld.schedulingGround.absTime = self.absTime
+	return
+
+def tcVerificationDecode():
+	"""
+	@purpose:   This function is used when the PUS packet which was received is a TC
 				verification packet. 
 				The intent here is to route the packet to the subsidiary service that
 				it is intended for (TC Acceptance Report) OR to log the verification
 				to the Event Log / Alert FDIR (TC Execution Report)
 	"""	
 	verificationAPID = 0
-	verificationPacketID = currentCommand[135] << 8
-	verificationPacketID += currentCommand[134]
-	verificationPSC	= currentCommand[133] << 8
-	verificationPSC += currentCommand[132]
+	verificationPacketID = self.currentCommand[135] << 8
+	verificationPacketID += self.currentCommand[134]
+	verificationPSC	= self.currentCommand[133] << 8
+	verificationPSC += self.currentCommand[132]
 	if(self.serviceTypeRx == 1):
-		verificationAPID = currentCommand[135]
-		currentCommand[146] = 1
+		verificationAPID = self.currentCommand[135]
+		self.currentCommand[146] = 1
 		if(verificationAPID == self.hkTaskID):
 			self.sendCurrentCommandToFifo(self.GPRTohkFifo)			# Send the TC Acceptance Report to the housekeeping service.
 		if(verificationAPID == self.MemoryTaskID):
@@ -165,17 +183,20 @@ def tcVerificationDecode(self):
 			self.sendCurrentCommandToFifo(self.GPRTofdirFifo)
 	if(self.serviceTypeRx == 2)
 		self.logEventReport(2, self.TMExecutionFailed, 0, 0, "Telecommand Execution Failed. for PacketID: %s, PSC: %s" %str(verificationPacketID) % str(verificationPSC))
+		self.currentCommand[146] = self.TMExecutionFailed
+		self.currentCommand[146] = 3
+		self.sendCurrentCommandToFifo(self.GPRTofdirFifo)		# Alert FDIR that something is going wrong.
 	return
 
 # Each element of the tmToDecode array needs to be an integer
-def decodeTelemetry(self):
+def decodeTelemetry():
 	"""
 	@purpose:   This method will decode the telemetry packet which was sent by the satellite
 				(located in tmToDecode[]). It will either send the appropriate commands
 				to the subsidiary services or it will act on the telemetry itself (if it is valid).
 				For now, we will log all telemtry for safe-keeping / debugging.
 	"""	
-	if(!self.curentTmCount):
+	if(!self.currentTmCount):
 		return -1
 
 	self.packetID = tmToDecode[151] << 8
@@ -201,69 +222,124 @@ def decodeTelemetry(self):
 	self.pec1 = tmToDecode[1] << 8
 	self.pec1 |= tmToDecode[0]
 	# Check that the packet error control is correct
-	self.pec0 = self.fletcher16(tmToDecode, 2, 150)
+	self.pec0 = fletcher16(tmToDecode, 2, 150)
 	x = -1
-	x = self.verifyTelemetry()
+	x = verifyTelemetry()
 
 	if x < 0:
 		return -1
 
-	self.decodeTelemetryH()
+	decodeTelemetryH()
 	return
 
-def decodeTelemetrH(self):
+def decodeTelemetryH():
 	"""
 	@purpose:   Helper to decodeTelemetry, this method looks at self.serviceTypeRx and 
 				self.serviceSubTypeRx of the telemetry packet stored in tmToDecode[] and
 				performs the actual routing of messages and executing of required actions.
 	"""	
-	if(!self.curentTmCount):	# Method executed out of turn
+	if(!self.currentTmCount):	# Method executed out of turn
 		return -1
 
 	self.clearCurrentCommand()
 	for i in range(2, self.dataLength + 2):
-		currentCommand[i]
+		self.currentCommand[i - 2] = self.tmToDecode[i]
 	
-	self.curentTmCount--
+	self.currentTmCount--
 
-	currentCommand[140] = self.packetID >> 8
-	currentCommand[139] = self.packetID & 0x000000FF
-	currentCommand[138] = self.psc >> 8
-	currentCommand[137] = self.psc & 0x000000FF
+	self.currentCommand[140] = self.packetID >> 8
+	self.currentCommand[139] = self.packetID & 0x000000FF
+	self.currentCommand[138] = self.psc >> 8
+	self.currentCommand[137] = self.psc & 0x000000FF
 
 	if(self.serviceTypeRx == self.tcVerifyService):
-		# If TC Acceptance verification, route to the corresponding service
-		# Else if TC Execution verification, make a note of it in the event log.
+		tcVerificationDecode()
 	if(self.serviceTypeRx == self.hkService):
-		currentCommand[146] = self.serviceSubTypeRx
-		currentCommand[145] = currentCommand[135]
-		currentCommand[144] = currentCommand[134]
+		self.currentCommand[146] = self.serviceSubTypeRx
+		self.currentCommand[145] = self.currentCommand[135]
+		self.currentCommand[144] = self.currentCommand[134]
 		self.sendCurrentCommandToFifo(self.GPRTohkFifo)
 	if(self.serviceTypeRx == self.timeService):
-		# Synch Time With satellite here.
+		syncWithIncomingTime()
 	if(self.serviceTypeRx == self.kService):
-		currentCommand[146] = self.serviceSubTypeRx
+		self.currentCommand[146] = self.serviceSubTypeRx
 		self.sendCurrentCommandToFifo(self.GPRToschedFifo)
 	if(self.serviceTypeRx == self.eventReportService):
-		# Store the received event in the eventLog, check if the event was an error.
+		checkIncomingEventReport()
 	if(self.serviceTypeRx == self.memService):
-		currentCommand[146] == self.memService
+		self.currentCommand[146] == self.memService
 		self.sendCurrentCommandToFifo(self.GPRTomemFifo)
 	if(self.serviceTypeRx == self.fdirService):
-		currentCommand[145] == fdirService
+		self.currentCommand[145] == fdirService
+		self.sendCurrentCommandToFifo(self.GPRTofdirFifo)
+	return
+
+def checkIncomingEventReport():
+	"""
+	@purpose:   This function stores the received event in the eventLog. If there was an error,
+				then this function will send an alert to FDIRGround for it to deal with the issue.
+	"""	
+	severity = self.currentCommand[3]
+	reportID = self.currentCommand[2]
+	p1 = self.currentCommand[1]
+	p0 = self.currentCommand[0]
+
+	self.logEventReport(severity, reportID, p1, p0, "Satellite event report received.")
+	# If the event report was a failure, forward it to the FDIR task.
+	if(self.serviceSubTypeRx > 1):
+		self.currentCommand[146] = reportID
+		self.currentCommand[145] = severity
+		self.sendCurrentCommandToFifo(self.GPRtofdir)
+	return
+
+def syncWithIncomingTime():
+	# Needs to save the old absolute time so that we can go back to it if we want to.
+	"""
+	@purpose:   This function looks at the incoming time and computes the difference between
+				satellite time and ground time. If the difference is greater than 90 minutes,
+				then the time between the ground and the satellite is considered to be out of
+				sync. In this case, we adopt the satellite's time, store self.absTime in self.oldAbsTime
+				and then we send an alert to FDIRGround.
+	"""	
+	incomDay = self.currentCommand[0]
+	incomHour = self.currentCommand[1]
+	incomMinute = self.currentCommand[2]
+	logEventReport(1, self.timeReportReceived, 0, 0, "Time Report Received. D: %S H: %s M: %s" %incomDay %incomHour %incomMinute)
+	incomAbsMinutes = (incomDay * 24 * 60) + (incomHour * 60) + incomMinute
+	localAbsMinutes = (self.absTime.day * 24 * 60) + (self.absTime.hour * 60) + self.absTime.minute
+
+	timeDelta = abs(localAbsTime - incomAbsTime)	# Difference in minutes between ground time and satellite time
+
+	if(timeDelta > 90):		# If the difference in time is greater than one -approximate- orbit, something is wrong.
+		self.printToCLI("Satellite time is currently out of sync.\n")
+		# Store the current ground time.
+		self.oldAbsTime self.absTime
+		# Adopt the satellite's time
+		absTime.day = incomDay
+		absTime.hour = incomHour
+		absTime.minute = incomMinute
+		# Send a command to the FDIR task in order to resolve this issue
+		self.currentCommand[146] = self.timeOutOfSync
+		self.currentCommand[145] = 2	# Severity
 		self.sendCurrentCommandToFifo(self.GPRTofdirFifo)
 	return
 
 def sendCurrentCommandToFifo(self, fifo):
+	"""
+	@purpose:   This method is takes what is contained in currentCommand[] and
+	then place it in the given fifo "fifo".
+	We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
+	Each subquesequent byte is then placed in the fifo followed by a newline character.
+	"""	
 	tempString = None
 	fifo.write("START\n")
 	for i in range(0, self.dataLength + 10):
-		tempString + str(currentCommand[i]) + "\n"
+		tempString + str(self.currentCommand[i]) + "\n"
 		fifo.write(tempString)
 	fifo.write("STOP\n")
 	return
 
-def verifyTelemetry(self):
+def verifyTelemetry():
 	"""
 	@purpose:   This method is used to determine whether or not the TM packet which 
 				was received is valid for decoding.
@@ -271,7 +347,7 @@ def verifyTelemetry(self):
 				/telemetry
 	@return:	-1 = packet failed the verification, 1 = good to decode
 	"""	
-	if(!self.curentTmCount):	# Method executed out of turn
+	if(!self.currentTmCount):	# Method executed out of turn
 		return -1
 
 	if(self.packetLengthRx != self.packetLength):
@@ -367,7 +443,7 @@ def verifyTelemetry(self):
 	return 1
 
 
-def fletcher16(self, *data, offset, count):
+def fletcher16(*data, offset, count):
 	"""
 	@purpose:   This method is to be used to compute a 16-bit checksum in the exact same
 				manner that it is computed on the satellite.
@@ -431,29 +507,39 @@ def logEventReport(self, severity, reportID, param1, param0, message=None):
 	@param: param1,0: extra information sent from the satellite.
 	"""
 	# Event logs include time, which may have come from the satellite.
+	tempString  = None
+	if severity == 1:
+		tempString = "NORMAL REPORT (SEV 1)\t"
+	if severity == 2:
+		tempString = "ERROR  REPORT (SEV 2)\t"
+	if severity == 3:
+		tempString = "ERROR  REPORT (SEV 3)\t" 
+	if severity == 4:
+		tempString = "ERROR  REPORT (SEV 4)\t" 
 	self.eventLock.acquire()
-	self.hkLog.write("**************EVENTLOG START*****************\n")
-	self.eventLog.write(str(self.currentTime.day) + "/" + str(self.currentTime.hour) + "/" + str(self.currentTime.minute) + "\t,\t")
-	self.eventLog.write(str(severity) + "\t,\t")
+	self.evenLog.write(tempString)
+	self.eventLog.write(str(self.absTime.day) + "/" + str(self.absTime.hour) + "/" + str(self.absTime.minute) + "\t,\t")
 	self.eventLog.write(str(reportID) + "\t,\t")
 	self.eventLog.write(str(param1) + "\t,\t")
-	self.eventLog.write(str(param0) + "\t,\n")
+	self.eventLog.write(str(param0) + "\t,\t")
 	if(message is not None):
 		self.evenLog.write(str(message) + "\n")
-	self.hkLog.write("**************EVENTLOG STOP******************\n")
-
+	if(message is None):
+		self.eventLog.write("\n")
 	self.eventLock.release()
 	return
 
 @classmethod
-def logHKReport(*hkArray, day, hour, minute):
+def logHKReport(*hkArray):
+	# Note that Housekeeping reports are created in a manner that is more convenient
+	# for Excel or Matlab to parse but not really that great for human consumption
 	self.hkLock.acquire()
-	self.hkLog.write("***********HOUSEKEEPING START****************\n")
-	self.hkLog.write(str(day) + "/" + str(hour) + "/" + str(minute) + "\n")
+	self.hkLog.write("HKLOG:\t")
+	self.hkLog.write(str(self.absTime.day) + "/" + str(self.absTime.day) + "/" + str(self.absTime.day) + "\t,\t")
 	for byte in hkArray:
-		self.hkLog.write(str(byte) + "\n")
-	self.hkLog.write("***********HOUSEKEEPING STOP*****************\n")
-	self.hkLock.release()
+		byte = byte & 0x000000FF
+		self.hkLog.write(str(byte) + "\t,\t")
+	self.hkLog.write("\n")
 	return
 
 @classmethod
@@ -472,7 +558,7 @@ def printToCLI(self, stuff):
 	return
 
 @classmethod
-def clearCurrentCommand(self):
+def clearCurrentCommand():
 	i = 0
 	for i in range(0, (self.dataLength + 10)):
 		self.currentCommand[i] = 0
@@ -528,6 +614,8 @@ def __init__(self):
 	self.fdirgroundinitialized  = 0xFD
 	self.incomTMSuccess			= 0xFC
 	self.TMExecutionFailed		= 0xFB
+	self.timeReportReceived		= 0xFA
+	self.timeOutOfSync			= 0xFB
 	# IDs for Communication:
 	self.comsID					= 0x00
 	self.epsID					= 0x01
@@ -550,11 +638,6 @@ def __init__(self):
 	self.GroundPacketRouterID	= 0x13
 	self.FDIRGroundID			= 0x14
 	self.schedGroundID		= 0x15
-	# Global Variables for Time
-	self.abs_day				= day
-	self.abs_hour				= hour
-	self.abs_minute				= minute
-	self.abs_second				= second
 
 if __name__ == '__main__':
 	x = groundPacketRouter()
