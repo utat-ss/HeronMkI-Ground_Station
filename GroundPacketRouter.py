@@ -18,7 +18,9 @@ ABNORMAL TERMINATION CONDITIONS, ERROR AND WARNING MESSAGES: None yet.
 ASSUMPTIONS, CONSTRAINTS, CONDITIONS: None.
 
 NOTES:
-		- Need to update logEventReport so that it prints different stuff depending on the severity.
+		- My subsidiary services need to wait for TC Acceptance verification before
+		  proceeding on with other things. I will add in this code later.
+		- 
 
 REQUIREMENTS:
 	-Python 2.7
@@ -36,6 +38,8 @@ DEVELOPMENT HISTORY:
 
 11/18/2015			Finished decodeTelemtry(), decodeTelemtry(), verifyTelemetry().
 
+11/20/2015			Added in Fifos so that each service can communicate with the FDIR service 
+					independently.
 """
 
 
@@ -82,7 +86,7 @@ def initialize(self):
 
 	"""Get the absolute time from the satellite and update ours."""
 
-	# Create all the required FIFOs
+	# Create all the required FIFOs for PUS communicattion
 	os.mkfifo("/fifos/hkToGPR.fifo")
 	self.hkToGPRFifo = open("/fifos/hkToGPR.fifo", "rb")
 	os.mkfifo("/fifos/GPRtohk.fifo")
@@ -99,6 +103,19 @@ def initialize(self):
 	self.GPRtoschedFifo = open("/fifos/GPRTosched.fifo")
 	os.mkfifo("/fifos/schedToGPR.fifo")
 	self.schedToGPRFifo = open("/fifos/schedToGPR.fifo")
+	# Create all the required FIFOs for the FDIR service
+	path1 = "/fifos/hktoFDIR.fifo"
+	path2 = "/fifos/memtoFDIR.fifo"
+	path3 = "/fifos/schedtoFDIR.fifo"
+	path4 = "/fifos/FDIRtohk.fifo"
+	path5 = "/fifos/FDIRtomem.fifo"
+	path6 = "/fifos/FDIRtosched.fifo"
+	os.mkfifo(path1)
+	os.mkfifo(path2)
+	os.mkfifo(path3)
+	os.mkfifo(path4)
+	os.mkfifo(path5)
+	os.mkfifo(path6)
 	# Create all the files required for logging
 	self.eventLog = None
 	self.hkLog = None
@@ -126,23 +143,28 @@ def initialize(self):
 		self.errorLog = open(errorPath, "wb")
 
 	# Create Mutex locks for accessing logs and printing to the CLI.
-	self.hkLock = Lock()
-	self.eventLock = Lock()
-	self.cliLock = Lock()
-	self.errorLock = Lock()
+	self.hkLock 		= Lock()
+	self.eventLock 		= Lock()
+	self.cliLock 		= Lock()
+	self.errorLock 		= Lock()
+	self.hkTCLock		= Lock()
+	self.memTCLock		= Lock()
+	self.schedTCLock	= Lock()
+	self.fdirTCLock		= Lock()
 
 	# Create all the required PUS Services
-	self.HKGroundService 		= hkService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
-												absTime.day, absTime.minute, absTime.minute, absTime.second, hkDefPath)
-	self.HKPID = self.HKGroundService.pid
-	self.MemoryGroundService 	= MemoryService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
-												absTime.day, absTime.minute, absTime.minute, absTime.second)
-	self.memPID = self.MemoryGroundService.pid
-	self.FDIRGround 			= FDIRService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
-												absTime.day, absTime.minute, absTime.minute, absTime.second)
+	self.hkGroundService 		= hkService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", path1, path4, self.hkTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock, 
+										self.cliLock, self.errorLock, absTime.day, absTime.minute, absTime.minute, absTime.second, hkDefPath)
+	self.memoryGroundService 	= MemoryService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", path2, path5, self.memTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock, 
+										self.cliLock, self.errorLock, absTime.day, absTime.minute, absTime.minute, absTime.second)
+	self.schedulingGround		= schedulingService("/fifos/schedToGPR.fifo", "/fifos/GPRtosched.fifo", path3, path6, self.schedTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock, 
+										self.cliLock, self.errorLock, absTime.day, absTime.minute, absTime.minute, absTime.second)
+	self.FDIRGround 			= FDIRService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", path1, path2, path3, path4, path5, path6, self.fdirTCLock, eventPath, hkPath, errorPath, 
+										self.eventLock, self.hkLock, self.cliLock, self.errorLock, absTime.day, absTime.minute, absTime.minute, absTime.second)
+	# These are the actual Linux process IDs of the services which were just created.
+	self.HKPID = self.hkGroundService.pid
+	self.memPID = self.memoryGroundService.pid
 	self.FDIRPID = self.FDIRGround.pid
-	self.schedulingGround		= schedulingService("/fifos/schedToGPR.fifo", "/fifos/GPRtosched.fifo", eventPath, hkPath, errorPath, self.eventLock, self.hkLock, self.cliLock, self.errorLock,
-												absTime.day, absTime.minute, absTime.minute, absTime.second)
 	self.schedPID = self.schedulingGround.pid
 	return
 
@@ -151,8 +173,8 @@ def updateServiceTime():
 	@purpose:   Whenever possible, GroundPacketRouter should update the time stored in the subsidiary services 
 				so that everything stays in sync.
 	"""	
-	self.HKGroundService.absTime = self.absTime
-	self.MemoryGroundService.absTime = self.absTime
+	self.hkGroundService.absTime = self.absTime
+	self.memoryGroundService.absTime = self.absTime
 	self.FDIRGround.absTime = self.absTime
 	seld.schedulingGround.absTime = self.absTime
 	return
@@ -164,28 +186,39 @@ def tcVerificationDecode():
 				The intent here is to route the packet to the subsidiary service that
 				it is intended for (TC Acceptance Report) OR to log the verification
 				to the Event Log / Alert FDIR (TC Execution Report)
+	@Note:		If the TC verification is a success, then we set the corresponding tc verification
+				attribute for that service, otherwise we send an alert to the FDIR task (and set nothing for the service)
 	"""	
 	verificationAPID = 0
 	verificationPacketID = self.currentCommand[135] << 8
 	verificationPacketID += self.currentCommand[134]
 	verificationPSC	= self.currentCommand[133] << 8
 	verificationPSC += self.currentCommand[132]
-	if(self.serviceTypeRx == 1):
+	if((self.serviceSubTypeRx == 1) || (self.serviceSubTypeRx == 7)):				# TC verification is a successful type.
 		verificationAPID = self.currentCommand[135]
 		self.currentCommand[146] = 1
 		if(verificationAPID == self.hkTaskID):
-			self.sendCurrentCommandToFifo(self.GPRTohkFifo)			# Send the TC Acceptance Report to the housekeeping service.
+			self.hkTCLock.acquire()
+			self.hkGroundService.tcAcceptVerification = (verificationPacketID << 16) & verificationPSC
+			self.hkTCLock.release()
 		if(verificationAPID == self.MemoryTaskID):
-			self.sendCurrentCommandToFifo(self.GPRTomemFifo)
+			self.memTCLock.acquire()
+			self.memoryGroundService.tcAcceptVerification = (verificationPacketID << 16) & verificationPSC
+			self.memTCLock.release()
 		if(verificationAPID == self.schedulingTaskID):
-			self.sendCurrentCommandToFifo(self.GPRtoschedFifo)
+			self.schedTCLock.acquire()
+			self.schedulingGround.tcAcceptVerification = (verificationPacketID << 16) & verificationPSC
+			self.schedTCLock.release()
 		if(verificationAPID == self.FDIRGroundID):
-			self.sendCurrentCommandToFifo(self.GPRTofdirFifo)
-	if(self.serviceTypeRx == 2)
+			self.fdirTCLock.acquire()
+			self.FDIRGround.tcAcceptVerification = (verificationPacketID << 16) & verificationPSC
+			self.fdirTCLock.release()
+	if((self.serviceSubTypeRx == 2) || (self.serviceSubTypeRx == 8))				# Tc verification is a failure type.
 		self.logEventReport(2, self.TMExecutionFailed, 0, 0, "Telecommand Execution Failed. for PacketID: %s, PSC: %s" %str(verificationPacketID) % str(verificationPSC))
 		self.currentCommand[146] = self.TMExecutionFailed
 		self.currentCommand[146] = 3
 		self.sendCurrentCommandToFifo(self.GPRTofdirFifo)		# Alert FDIR that something is going wrong.
+
 	return
 
 # Each element of the tmToDecode array needs to be an integer
@@ -334,7 +367,7 @@ def sendCurrentCommandToFifo(self, fifo):
 	tempString = None
 	fifo.write("START\n")
 	for i in range(0, self.dataLength + 10):
-		tempString + str(self.currentCommand[i]) + "\n"
+		tempString = str(self.currentCommand[i]) + "\n"
 		fifo.write(tempString)
 	fifo.write("STOP\n")
 	return
@@ -476,6 +509,7 @@ def stop(self):
 	self.fdirToGPRFifo.close()
 	self.GPRTofdirFifo.close()
 
+
 	# Kill all the children
 	if(self.HKGroundService.is_alive()):
 		self.HKGroundService.terminate()
@@ -496,6 +530,12 @@ def stop(self):
 	os.remove("/fifos/GPRtofdir.fifo")
 	os.remove("/fifos/GPRTosched.fifo")
 	os.remove("/fifos/schedToGPR.fifo")
+	os.remove("/fifos/hktoFDIR.fifo")
+	os.remove("/fifos/memtoFDIR.fifo")
+	os.remove("/fifos/schedtoFDIR.fifo")
+	os.remove("/fifos/FDIRtohk.fifo")
+	os.remove("/fifos/FDIRtomem.fifo")
+	os.remove("/fifos/FDIRtosched.fifo")
 	return
 
 @classmethod
@@ -616,6 +656,11 @@ def __init__(self):
 	self.TMExecutionFailed		= 0xFB
 	self.timeReportReceived		= 0xFA
 	self.timeOutOfSync			= 0xFB
+	self.timeReportReceived		= 0xFA
+	self.timeOutOfSync			= 0xF9
+	self.hkParamIncorrect		= 0xF8
+	self.hkintervalincorrect	= 0xF7
+	self.hkNumParamsIncorrect	= 0xF6
 	# IDs for Communication:
 	self.comsID					= 0x00
 	self.epsID					= 0x01

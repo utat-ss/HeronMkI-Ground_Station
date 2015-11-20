@@ -7,7 +7,7 @@ PURPOSE:			This class shall house all the common methods and atributes of PUS se
 
 FILE REFERENCES:
 
-LIBRARIES USED:		os, multiprocessing
+LIBRARIES USED:		os, multiprocessing, datetime
 
 SUPERCLASS:			Process
 
@@ -24,6 +24,8 @@ DEVELOPMENT HISTORY:
 
 11/17/2015			Added some more methods to this class for printing to logs.
 
+11/20/2015			Added a couple class methods for sending and receiving commands
+					from a FIFO.
 """
 
 import os
@@ -115,7 +117,46 @@ def printToCLI(self, stuff):
 	self.cliLock.release()
 	return
 
-def __init__(self, path1, path2, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second):
+@classmethod
+def sendCurrentCommandToFifo(self, fifo):
+	"""
+	@purpose:   This method is takes what is contained in currentCommand[] and
+	then place it in the given fifo "fifo".
+	@Note: We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
+	@Note: Each subquesequent byte is then placed in the fifo followed by a newline character.
+	"""	
+	tempString = None
+	fifo.write("START\n")
+	for i in range(0, self.dataLength + 10):
+		tempString = str(self.currentCommand[i]) + "\n"
+		fifo.write(tempString)
+	fifo.write("STOP\n")
+	return
+
+@classmethod
+def receiveCommandFromFifo(self, fifo):
+	"""
+	@purpose:   This method takes a command from the the fifo "fifo" which should have a 
+	length of 147 bytes & places it into the array self.currentCommand[].
+	@Note: We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
+	"""	
+	byteCount = 0
+	newString = None
+	i = 0
+	if(os.path.getsize(fifo) > 152):
+		i = 0
+		if(self.fifoFromGPR.readline() == "START\n"):
+			# Start reading in the command.
+			newString = fifo.readline()
+			newString = newString.rstrip()
+			while((newString != "STOP") && (i < (self.dataLength + 11))):
+				self.currentCommand[i] = int(newString)
+				newString = self.fifoFromGPR.readline()
+				newString = newString.rstrip()
+				i++
+	return
+
+def __init__(self, path1, path2, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second):
 	"""
 	@purpose: Initialization method for the PUS service class.
 	@param: path1: path to the file being used as a one-way fifo TO this PUS Service Instance
@@ -137,8 +178,10 @@ def __init__(self, path1, path2, eventPath, hkPath, errorPath, eventLock, hkLock
 	self.tcVerifyService 		= 1
 	self.hkService 				= 3
 	self.eventReportService 	= 5
+	self.memService 			= 6
 	self.timeService			= 9
 	self.kService				= 69
+	self.fdirService 			= 70
 	# Definitions to clarify which service subtypes represent what
 	# HOUSEKEEPING
 	self.newHKDefinition 		= 1
@@ -173,7 +216,12 @@ def __init__(self, path1, path2, eventPath, hkPath, errorPath, eventLock, hkLock
 	self.TMExecutionFailed		= 0xFB
 	self.timeReportReceived		= 0xFA
 	self.timeOutOfSync			= 0xF9
-	self.hkparamincorrect		= 0xF8
+	self.hkParamIncorrect		= 0xF8
+	self.hkIntervalIncorrect	= 0xF7
+	self.hkNumParamsIncorrect	= 0xF6
+	self.loadingFileToSat		= 0xF5
+	self.loadOperatonFailed		= 0xF4
+	self.loadCompleted			= 0xF3
 	# IDs for Communication:
 	self.comsID					= 0x00
 	self.epsID					= 0x01
@@ -259,6 +307,10 @@ def __init__(self, path1, path2, eventPath, hkPath, errorPath, eventLock, hkLock
 	self.hkLock = hkLock
 	self.cliLock = cliLock
 	self.errorLock = errorLock
+	self.tcLock = tcLock
+	# TC Verification Attribute used for letting the services know when a TC verification was received.
+	self.tcAcceptVerification = 0			# 0 = None received, should be cleared by the service.
+	self.tcExecuteVerification = 0
 	return
 
 if __name__ == '__main__':
