@@ -27,7 +27,7 @@ DEVELOPMENT HISTORY:
 
 import os
 from multiprocessing import *
-import PUSService
+from PUSService import *
 
 class schedulingService(PUSService):
 	"""
@@ -37,17 +37,18 @@ class schedulingService(PUSService):
 	"""
 	@classmethod
 	def run(self):
-	"""
-	@purpose:   Used to house the main program for the scheduling service.
-	@Note:		Since this class is a subclass of Process, when self.start() is executed on an 
-				instance of this class, a process will be created with the contents of run() as the 
-				main program.
-	"""	
+		"""
+		@purpose:   Used to house the main program for the scheduling service.
+		@Note:		Since this class is a subclass of Process, when self.start() is executed on an
+					instance of this class, a process will be created with the contents of run() as the
+					main program.
+		"""
 
-
-def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second):
+def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock,
+			 			errorLock, day, hour, minute, second):
 	# Inititalize this instance as a PUS service
-	super(schedulingGroundService, self).__init__(path1, path2, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second)
+	super(schedulingService, self).__init__(path1, path2, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock,
+						cliLock, errorLock, day, hour, minute, second)
 	# self.processID = 0x10
 	# self.serviceType = 3
 	# self.currentHK[]
@@ -69,5 +70,5 @@ def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorP
 	self.fifofromFDIR = open(path4, "rb")
 
 if __name__ == '__main__':
-	return
+	pass
 	
