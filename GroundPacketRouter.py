@@ -26,7 +26,7 @@ REQUIREMENTS:
 	-Python 2.7
 	-Linux Operating system (Ubuntu 14 was used)
 	-This class should be called via a normal terminal in Linux
-	-ex: python GrounPacketRouter.py
+	-ex: python GroundPacketRouter.py
 	-For the time being, we will have a serial connection to an Arduino Uno
 	which will allow us to connect to the transceiver remotely.
 	-We are using the CC1120 dev board as our "transceiver" for the groundstation
@@ -104,8 +104,6 @@ class groundPacketRouter(Process):
 	incomTMSuccess			= 0xFC
 	TMExecutionFailed		= 0xFB
 	timeReportReceived		= 0xFA
-	timeOutOfSync			= 0xFB
-	timeReportReceived		= 0xFA
 	timeOutOfSync			= 0xF9
 	hkParamIncorrect		= 0xF8
 	hkintervalincorrect		= 0xF7
@@ -150,7 +148,7 @@ class groundPacketRouter(Process):
 		"""
 		@purpose: Represents the main program for the ground packet router and Command-Line Interface.
 		"""
-		initialize()
+		self.initialize(self)
 
 		while(1):
 			# Check the transceiver for an incoming packet THIS NEEDS TO PUT INCOMING TELEMETRY
@@ -243,14 +241,22 @@ class groundPacketRouter(Process):
 		self.fdirTCLock		= Lock()
 
 		# Create all the required PUS Services
-		self.hkGroundService 		= hkService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", path1, path4, self.hkTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
-											self.cliLock, self.errorLock, self.absTime.day, self.absTime.minute, hkDefPath)
-		self.memoryGroundService 	= MemoryService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", path2, path5, self.memTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
-											self.cliLock, self.errorLock, self.absTime.day, self.absTime.minute, self.absTime.minute, self.absTime.second)
-		self.schedulingGround		= schedulingService("/fifos/schedToGPR.fifo", "/fifos/GPRtosched.fifo", path3, path6, self.schedTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
-											self.cliLock, self.errorLock, self.absTime.day, self.absTime.minute, self.absTime.minute, self.absTime.second)
-		self.FDIRGround 			= FDIRService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", path1, path2, path3, path4, path5, path6, self.fdirTCLock, eventPath, hkPath, errorPath,
-											self.eventLock, self.hkLock, self.cliLock, self.errorLock, self.absTime.day, self.absTime.minute, self.absTime.minute, self.absTime.second)
+		self.hkGroundService 		= hkService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", path1, path4,
+											self.hkTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
+											self.cliLock, self.errorLock, self.absTime.day, self.absTime.hour,
+											self.absTime.minute, self.absTime.second, hkDefPath)
+		self.memoryGroundService 	= MemoryService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", path2, path5,
+											self.memTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
+											self.cliLock, self.errorLock, self.absTime.day, self.absTime.hour,
+											self.absTime.minute, self.absTime.second)
+		self.schedulingGround		= schedulingService("/fifos/schedToGPR.fifo", "/fifos/GPRtosched.fifo", path3, path6,
+											self.schedTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
+											self.cliLock, self.errorLock, self.absTime.day, self.absTime.hour,
+											self.absTime.minute, self.absTime.second)
+		self.FDIRGround 			= FDIRService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", path1, path2, path3,
+											path4, path5, path6, self.fdirTCLock, eventPath, hkPath, errorPath,
+											self.eventLock, self.hkLock, self.cliLock, self.errorLock, self.absTime.day,
+											self.absTime.minute, self.absTime.minute, self.absTime.second)
 		# These are the actual Linux process IDs of the services which were just created.
 		self.HKPID = self.hkGroundService.pid
 		self.memPID = self.memoryGroundService.pid

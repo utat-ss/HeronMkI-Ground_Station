@@ -65,7 +65,6 @@ class MemoryService(PUSService):
 					main program.
 		"""
 		self.initialize(self)
-
 		while(1):
 			self.receiveCommandFromFifo(self.fifoFromGPR)		# If command in FIFO, places it in self.currentCommand[]
 			self.execCommands(self)										# Deals with commands from GPR
@@ -148,9 +147,9 @@ class MemoryService(PUSService):
 				self.currentCommand[j + 2] = (num & 0x0000FF00) >> 16
 				self.currentCommand[j + 3] = (num & 0x0000FF00) >> 24
 			# Send the currentCommand[] to GPR.
-			self.printToCLI("LOADING: %s of %s packets\n" %str(j) %numPackets)
+			self.printToCLI("LOADING: %s of %s packets\n" %str(numPackets) %str(numPackets))
 			self.sendCurrentCommandToFifo(self.fifoToGPR)
-			x = waitForTCVerification()
+			x = self.waitForTCVerification()
 			if (x < 0):
 				return
 
@@ -173,17 +172,14 @@ class MemoryService(PUSService):
 				self.currentCommand[j + 2] = (num & 0x0000FF00) >> 16
 				self.currentCommand[j + 3] = (num & 0x0000FF00) >> 24
 			# Send the currentCommand[] to GPR.
-			self.printToCLI("LOADING: %s of %s packets\n" %numPackets %numPackets)
+			self.printToCLI("LOADING: %s of %s packets\n" %str(numPackets) %str(numPackets))
 			self.sendCurrentCommandToFifo(self.fifoToGPR)
-			x = waitForTCVerification(5000)
+			x = self.waitForTCVerification(5000)
 			if (x < 0):
 				return
 			self.printToCLI("LOADING COMPLETE\n")
 			self.logEventReport(1, self.loadCompleted, 0, 0, "LOAD COMPLETE")
 		return
-
-
-
 
 	def waitForTCVerification(self, timeOut):
 		#TimeOut should be in terms of milliseconds.
