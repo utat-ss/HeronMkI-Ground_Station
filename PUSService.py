@@ -96,6 +96,7 @@ class PUSService(Process):
 	loadOperatonFailed		= 0xF4
 	loadCompleted			= 0xF3
 	dumpPacketWrong			= 0xF2
+	dumpCompleted			= 0xF1
 	# IDs for Communication:
 	comsID					= 0x00
 	epsID					= 0x01

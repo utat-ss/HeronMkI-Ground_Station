@@ -59,7 +59,18 @@ class MemoryService(PUSService):
 	localSequence 	= 0		# These shall be used to keep track of the sequence of incoming PUS dump packets.
 	localFlags	  	= -1
 	dumpCount	 	= 0		# Counter for the number of memory dumps that have been created so far.
+	checkCount		= 0
+	sequenceOffset	= 0
+	packetsRequested = 0
 	dumpFile		= None
+	checkFile		= None
+	memoryOperations ={
+		0x02		:	"MEMORY LOAD (ABSOLUTE)",
+		0X05		:	"DUMP REQUEST (ABSOLUTE)",
+		0x06		:	"MEMORY DUMP (ABSOLUTE)",
+		0X09		:	"CHECK MEMORY REQUEST (ABSOLUTE)",
+		0X0A 		:	"MEMORY CHECK (ABSOLUTE)"
+	}
 
 	@classmethod
 	def run(self):
@@ -122,10 +133,10 @@ class MemoryService(PUSService):
 		startingAddress = int(tempString2, 16)
 		tempString3		= (fileToLoad.readline()).rstrip()
 		lengthToLoad	= int(tempString3)
-		self.printToCLI("Attempting to load %s Bytes from File: %s to Address: %s in Memory: %s on the satellite...\n"
+		self.printToCLI("Attempting to upload %s Bytes from File: %s to Address: %s in Memory: %s on the satellite...\n"
 									%tempString3 %fileName %tempString2 %tempString1)
 		self.logEventReport(1, self.loadingFileToSat, 0, 0,
-						"Attempting to load %s Bytes from File: %s to Address: %s in Memory: %s on the satellite...\n"
+						"Attempting to upload %s Bytes from File: %s to Address: %s in Memory: %s on the satellite...\n"
 									%tempString3 %fileName %tempString2 %tempString1)
 
 		lengthToLoadInBytes = lengthToLoad * 4
@@ -152,7 +163,7 @@ class MemoryService(PUSService):
 				self.currentCommand[j + 2] = (num & 0x0000FF00) >> 16
 				self.currentCommand[j + 3] = (num & 0x0000FF00) >> 24
 			# Send the currentCommand[] to GPR.
-			self.printToCLI("LOADING: %s of %s packets\n" %str(numPackets) %str(numPackets))
+			self.printToCLI("UPLOADING: %s OF %s PACKETS FOR MEM LOAD\n" %str(numPackets) %str(numPackets))
 			self.sendCurrentCommandToFifo(self.fifoToGPR)
 			x = self.waitForTCVerification()
 			if (x < 0):
@@ -177,33 +188,46 @@ class MemoryService(PUSService):
 				self.currentCommand[j + 2] = (num & 0x0000FF00) >> 16
 				self.currentCommand[j + 3] = (num & 0x0000FF00) >> 24
 			# Send the currentCommand[] to GPR.
-			self.printToCLI("LOADING: %s of %s packets\n" %str(numPackets) %str(numPackets))
+			self.printToCLI("UPLOADING: %s OF %s PACKETS FOR MEM LOAD\n" %str(numPackets) %str(numPackets))
 			self.sendCurrentCommandToFifo(self.fifoToGPR)
 			x = self.waitForTCVerification(5000)
 			if (x < 0):
 				return
-			self.printToCLI("LOADING COMPLETE\n")
-			self.logEventReport(1, self.loadCompleted, 0, 0, "LOAD COMPLETE")
+			self.printToCLI("UPLOADING COMPLETE FOR MEM LOAD\n")
+			self.logEventReport(1, self.loadCompleted, 0, 0, "UPLOAD COMPLETE FOR MEM LOAD")
 		return
 
 	@staticmethod
 	def sendDumpRequest(self):
 		# Just send the command back to GPR so that it can turn this into a TC
+		self.printToCLI("SENDING A DUMP REQUEST TO THE SATELLITE...\n")
+		# Store the number of packets which are being requested.
+		length = self.currentCommand[131] << 24
+		length += self.currentCommand[130] << 16
+		length += self.currentCommand[129] << 8
+		length += self.currentCommand[128]
+		lengthToLoadInBytes = length * 4
+		numPackets = lengthToLoadInBytes / 128
+		if lengthToLoadInBytes % 128:
+			numPackets += 1
+		self.packetsRequested = numPackets
 		self.currentCommand[146] = self.dumpRequestABS
 		self.sendCurrentCommandToFifo(self.fifoToGPR)
-		self.waitForTCVerification(5000)				# Wait <= 5s for the command to be accepted/executed.
+		x = self.waitForTCVerification(5000, self.dumpRequestABS)	# Wait <= 5s for the command to be accepted/executed
+		if(x > 0):
+			self.printToCLI("DUMP REQUEST ACCEPTED AND STARTED...\n")
 		return
 
 	@staticmethod
 	def processMemoryDump(self):
 		# A memory dump packet has been received, parse it and possibly store it.
-		memPath = None
 		obcSequenceFlags	= self.currentCommand[143]
 		obcSequenceCount	= self.currentCommand[142]
 
 		if (obcSequenceFlags == 0x01):
 			if self.localFlags == -1:	# The First packet of several.
 				self.localSequence = obcSequenceCount
+				self.sequenceOffset = obcSequenceCount
 				self.localFlags = obcSequenceFlags
 			else:
 				self.currentCommand[146] = self.dumpPacketWrong				# Packet is rejected.
@@ -242,6 +266,20 @@ class MemoryService(PUSService):
 				self.localFlags = -1
 				return
 
+		# Print something meaningful to the CLI.
+		if(self.localFlags == 0x01):
+			self.printToCLI("DOWNLOADING PACKET 1 OF %s FOR MEM DUMP\n" %str(self.packetsRequested))
+		if(self.localFlags == 0x11):
+			self.printToCLI("DOWNLOADING PACKET 1 of 1 FOR MEM DUMP\n")
+		if(self.localFlags == 0x00):
+			packetNum = obcSequenceCount - self.sequenceOffset + 1
+			self.printToCLI("DOWNLOADING PACKET %s OF %s FOR MEM DUMP\n" %str(packetNum) %str(self.packetsRequested))
+		if(self.localFlags == 0x10):
+			packetNum = obcSequenceCount - self.sequenceOffset + 1
+			self.printToCLI("DOWNLOADING PACKET %s OF %s FOR MEM DUMP\n" %str(packetNum) %str(self.packetsRequested))
+			self.printToCLI("DOWNLOAD COMPLETE FOR MEM DUMP %s\n" %str(self.dumpCount))
+			self.logEventReport(1, self.dumpCompleted, 0, 0, "DOWNLOAD COMPLETE FOR MEM DUMP %s" %str(self.dumpCount))
+
 		if(self.localFlags == 0x01 or self.localFlags == 0x11):
 			memPath = "/memory/dumps/memdump%s" %str(self.dumpCount)		#Create a new file for the mem dump.
 			if os.path.exists(memPath):
@@ -249,7 +287,7 @@ class MemoryService(PUSService):
 			else:
 				self.dumpFile = open(memPath, "ab")
 
-			self.dumpFile.write(str(self.currentCommand[136]) + "\n")
+			self.dumpFile.write(str(self.currentCommand[136]) + "\n")		# The memoryID goes @ the top of the file
 			address = self.currentCommand[135] << 24
 			address += self.currentCommand[134] << 16
 			address += self.currentCommand[133] << 8
@@ -258,8 +296,8 @@ class MemoryService(PUSService):
 			length += self.currentCommand[130] << 16
 			length += self.currentCommand[129] << 8
 			length += self.currentCommand[128]
-			self.dumpFile.write(str(hex(address)) + "\n")
-			self.dumpFile.write(str(length) + "\n")
+			self.dumpFile.write(str(hex(address)) + "\n")					# Followed by address (in hex)
+			self.dumpFile.write(str(length) + "\n")							# And then length (in bytes, decimal)
 			for i in range(0, 128):
 				self.dumpFile.write(str(self.currentCommand[i]) + "\n")
 		if(self.localFlags == 0x00 or self.localFlags == 0x10):
@@ -270,20 +308,64 @@ class MemoryService(PUSService):
 			self.localFlags = -1
 			self.dumpCount += 1
 		return
-			
+
 	@staticmethod
-	def waitForTCVerification(self, timeOut):
+	def sendCheckMemRequest(self):
+		self.currentCommand[146] = self.checkMemRequest
+		self.sendCurrentCommandToFifo(self.fifoToGPR)
+		self.waitForTCVerification(5000, self.checkMemRequest)
+
+	@staticmethod
+	def processMemoryCheck(self):
+		self.currentCommand[146] = self.memoryCheckABS
+		# Get the address and length of the checksum that was computed
+		address = self.currentCommand[135] << 24
+		address += self.currentCommand[134] << 16
+		address += self.currentCommand[133] << 8
+		address += self.currentCommand[132]
+		length = self.currentCommand[131] << 24
+		length += self.currentCommand[130] << 16
+		length += self.currentCommand[129] << 8
+		length += self.currentCommand[128]
+		# Load the value of the checksum into the checkSum variable
+		checkSum	=  long(self.currentCommand[7]	<< 56)
+		checkSum	+= long(self.currentCommand[6]	<< 48)
+		checkSum	+= long(self.currentCommand[5]	<< 40)
+		checkSum	+= long(self.currentCommand[4]	<< 32)
+		checkSum	+= long(self.currentCommand[3]	<< 24)
+		checkSum	+= long(self.currentCommand[2]	<< 16)
+		checkSum	+= long(self.currentCommand[1]	<< 8)
+		checkSum	+= long(self.currentCommand[0])
+		# Store the checksum in memory.
+		checkPath = "/memory/checks/memcheck%s" %str(self.checkCount)		#Create a new file for the mem check.
+		if os.path.exists(checkPath):
+			self.checkFile = open(checkPath, "wb+")
+		else:
+			self.checkFile = open(checkPath, "ab")
+
+		self.dumpFile.write(str(self.currentCommand[136]) + "\n")		# The memoryID goes @ the top of the file
+		self.dumpFile.write(str(hex(address)) + "\n")					# Followed by address (in hex)
+		self.dumpFile.write(str(length) + "\n")							# And then length (in bytes)
+		self.printToCLI()
+
+		self.checkCount += 1
+		return
+
+	@staticmethod
+	def waitForTCVerification(self, timeOut, operation):
 		# TimeOut should be in terms of milliseconds.
 		waitTime = datetime.timedelta(0)
 		while((waitTime.milliseconds < timeOut) and (not self.tcAcceptVerification or not self.tcExecuteVerification)):
 			pass
 		if(waitTime > timeOut):
-			self.printToCLI("THE LOAD OPERATION HAS FAILED")
-			self.logError("THE LOAD OPERATION HAS FAILED.")
-			self.currentCommand[146] = self.loadOperatonFailed
+			self.printToCLI("MEMORY SERVICE OPERATION: %s HAS FAILED\n" %self.memoryOperations[operation])
+			self.logError("MEMORY SERVICE OPERATION: %s HAS FAILED" %self.memoryOperations[operation])
+			self.currentCommand[146] = operation
 			self.sendCurrentCommandToFifo(self.fifotoFDIR)
 			return -1
 		else:
+			self.logEventReport(1, operation, 0, 0,
+								"MEMORY SERVICE OPERATION: %s HAS SUCCEEDED" %self.memoryOperations[operation])
 			self.tcLock.acquire()
 			self.tcAcceptVerification = 0
 			self.tcExecuteVerification = 0
