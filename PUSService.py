@@ -84,17 +84,18 @@ class PUSService(Process):
 	memoryWashFinished		= 0x03
 	hkgroundinitialized		= 0xFF
 	memgroundinitialized	= 0xFE
-	fdirgroundinitialized  = 0xFD
+	fdirgroundinitialized  	= 0xFD
 	incomTMSuccess			= 0xFC
 	TMExecutionFailed		= 0xFB
 	timeReportReceived		= 0xFA
 	timeOutOfSync			= 0xF9
 	hkParamIncorrect		= 0xF8
-	hkIntervalIncorrect	= 0xF7
+	hkIntervalIncorrect		= 0xF7
 	hkNumParamsIncorrect	= 0xF6
 	loadingFileToSat		= 0xF5
 	loadOperatonFailed		= 0xF4
 	loadCompleted			= 0xF3
+	dumpPacketWrong			= 0xF2
 	# IDs for Communication:
 	comsID					= 0x00
 	epsID					= 0x01
@@ -265,9 +266,8 @@ class PUSService(Process):
 		@purpose:   This method is takes what is contained in currentCommand[] and
 		then place it in the given fifo "fifo".
 		@Note: We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
-		@Note: Each subquesequent byte is then placed in the fifo followed by a newline character.
+		@Note: Each subsequent byte is then placed in the fifo followed by a newline character.
 		"""
-		tempString = None
 		fifo.write("START\n")
 		for i in range(0, self.dataLength + 10):
 			tempString = str(self.currentCommand[i]) + "\n"
@@ -282,8 +282,6 @@ class PUSService(Process):
 		length of 147 bytes & places it into the array self.currentCommand[].
 		@Note: We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
 		"""
-		byteCount = 0
-		newString = None
 		i = 0
 		if(os.path.getsize(fifo) > 152):
 			i = 0

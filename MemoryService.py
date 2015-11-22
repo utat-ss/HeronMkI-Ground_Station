@@ -56,6 +56,11 @@ class MemoryService(PUSService):
 	"""
 	This class is meant to represent the PUS Memory Management Service.
 	"""
+	localSequence 	= 0		# These shall be used to keep track of the sequence of incoming PUS dump packets.
+	localFlags	  	= -1
+	dumpCount	 	= 0		# Counter for the number of memory dumps that have been created so far.
+	dumpFile		= None
+
 	@classmethod
 	def run(self):
 		"""
@@ -181,8 +186,94 @@ class MemoryService(PUSService):
 			self.logEventReport(1, self.loadCompleted, 0, 0, "LOAD COMPLETE")
 		return
 
+	@staticmethod
+	def sendDumpRequest(self):
+		# Just send the command back to GPR so that it can turn this into a TC
+		self.currentCommand[146] = self.dumpRequestABS
+		self.sendCurrentCommandToFifo(self.fifoToGPR)
+		self.waitForTCVerification(5000)				# Wait <= 5s for the command to be accepted/executed.
+		return
+
+	@staticmethod
+	def processMemoryDump(self):
+		# A memory dump packet has been received, parse it and possibly store it.
+		memPath = None
+		obcSequenceFlags	= self.currentCommand[143]
+		obcSequenceCount	= self.currentCommand[142]
+
+		if (obcSequenceFlags == 0x01):
+			if self.localFlags == -1:	# The First packet of several.
+				self.localSequence = obcSequenceCount
+				self.localFlags = obcSequenceFlags
+			else:
+				self.currentCommand[146] = self.dumpPacketWrong				# Packet is rejected.
+				self.sendCurrentCommandToFifo(self.fifotoFDIR)
+				self.localSequence = 0
+				self.localFlags = -1
+				return
+		if (obcSequenceFlags == 0x11):
+			if self.localFlags == -1:	# The First packet of several.
+				self.localSequence = obcSequenceCount
+				self.localFlags = obcSequenceFlags
+			else:
+				self.currentCommand[146] = self.dumpPacketWrong
+				self.sendCurrentCommandToFifo(self.fifotoFDIR)
+				self.localSequence = 0
+				self.localFlags = -1
+				return
+		if (obcSequenceFlags == 0x00):
+			if ((self.localFlags == 0x01) or (self.localFlags == 0x00) and (self.localSequence < obcSequenceCount)):
+				self.localSequence = obcSequenceCount
+				self.localFlags = obcSequenceFlags
+			else:
+				self.currentCommand[146] = self.dumpPacketWrong
+				self.sendCurrentCommandToFifo(self.fifotoFDIR)
+				self.localSequence = 0
+				self.localFlags = -1
+				return
+		if(obcSequenceFlags == 0x11):
+			if ((self.localFlags == 0x00) and (self.localSequence < obcSequenceCount)):
+				self.localSequence = obcSequenceCount
+				self.localFlags = obcSequenceFlags
+			else:
+				self.currentCommand[146] = self.dumpPacketWrong
+				self.sendCurrentCommandToFifo(self.fifotoFDIR)
+				self.localSequence = 0
+				self.localFlags = -1
+				return
+
+		if(self.localFlags == 0x01 or self.localFlags == 0x11):
+			memPath = "/memory/dumps/memdump%s" %str(self.dumpCount)		#Create a new file for the mem dump.
+			if os.path.exists(memPath):
+				self.dumpFile = open(memPath, "ab+")
+			else:
+				self.dumpFile = open(memPath, "ab")
+
+			self.dumpFile.write(str(self.currentCommand[136]) + "\n")
+			address = self.currentCommand[135] << 24
+			address += self.currentCommand[134] << 16
+			address += self.currentCommand[133] << 8
+			address += self.currentCommand[132]
+			length = self.currentCommand[131] << 24
+			length += self.currentCommand[130] << 16
+			length += self.currentCommand[129] << 8
+			length += self.currentCommand[128]
+			self.dumpFile.write(str(hex(address)) + "\n")
+			self.dumpFile.write(str(length) + "\n")
+			for i in range(0, 128):
+				self.dumpFile.write(str(self.currentCommand[i]) + "\n")
+		if(self.localFlags == 0x00 or self.localFlags == 0x10):
+			for i in range(0, 128):
+				self.dumpFile.write(str(self.currentCommand[i]) + "\n")
+		if(self.localFlags == 0x10):
+			self.localSequence = 0
+			self.localFlags = -1
+			self.dumpCount += 1
+		return
+			
+	@staticmethod
 	def waitForTCVerification(self, timeOut):
-		#TimeOut should be in terms of milliseconds.
+		# TimeOut should be in terms of milliseconds.
 		waitTime = datetime.timedelta(0)
 		while((waitTime.milliseconds < timeOut) and (not self.tcAcceptVerification or not self.tcExecuteVerification)):
 			pass
@@ -201,7 +292,7 @@ class MemoryService(PUSService):
 
 	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock,
 				 	errorLock, day, hour, minute, second):
-		# Inititalize this instance as a PUS service
+		# Initialize this instance as a PUS service
 		super(MemoryService, self).__init__(path1, path2, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock,
 					cliLock, errorLock, day, hour, minute, second)
 		self.processID = 0x12
