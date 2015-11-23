@@ -45,6 +45,8 @@ DEVELOPMENT HISTORY:
 
 11/20/2015			Currently working on the bulk of this service's functionality including loadToSatelliteMemory()
 
+11/21/2015			Finished writing the majority of the code that was required for this service today.
+
 """
 
 import os
@@ -83,7 +85,7 @@ class MemoryService(PUSService):
 		self.initialize(self)
 		while(1):
 			self.receiveCommandFromFifo(self.fifoFromGPR)		# If command in FIFO, places it in self.currentCommand[]
-			self.execCommands(self)										# Deals with commands from GPR
+			self.execCommands(self)								# Deals with commands from GPR
 		return				# This should never be reached.
 
 	@staticmethod
@@ -92,7 +94,7 @@ class MemoryService(PUSService):
 		@purpose:   - Initializes required variables for the memory service.
 		"""
 		self.clearCurrentCommand()
-		self.logEventReport(1, self.hkgroundinitialized, 0, 0, "Ground Memory Service Initialized Correctly.")
+		self.logEventReport(1, self.memgroundinitialized, 0, 0, "Ground Memory Service Initialized Correctly.")
 		return
 
 	@staticmethod
@@ -111,6 +113,8 @@ class MemoryService(PUSService):
 			self.sendCheckMemRequest()
 		if(self.currentCommand[146] == self.memoryCheckABS):
 			self.processMemoryCheck()
+		self.clearCurrentCommand()
+		return
 
 	@staticmethod
 	def loadToSatelliteMemory(self):
