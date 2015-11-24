@@ -78,6 +78,7 @@ class PUSService(Process):
 	clearSchedule			= 2
 	schedReportRequest		= 3
 	schedReport 			= 4
+	updatingSchedule		= 5
 	# Event Report ID
 	kickComFromSchedule		= 0x01
 	bitFlipDetected			= 0x02
@@ -98,6 +99,7 @@ class PUSService(Process):
 	dumpPacketWrong			= 0xF2
 	dumpCompleted			= 0xF1
 	schedGroundInitialized	= 0xF0
+	updatingSchedAut		= 0xEF
 	# IDs for Communication:
 	comsID					= 0x00
 	epsID					= 0x01

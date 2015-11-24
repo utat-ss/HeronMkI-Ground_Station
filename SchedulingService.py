@@ -21,8 +21,8 @@ NOTES:				For the sake of human readability and computer readability, we are goi
 					Human Format:
 
 					TIME			APID		COMMAND		SEV		PARAM		COMPLETED		COMMENT
-					DD/HH/MM/SS		0xFF		0xFF		0|1|2	0xFF		Y|N|E			payload stuff
-																			(E = erased)
+					DD/HH/MM/SS		0xFF		0xFF		0|1|2	0xFF		Y|N|E|F			payload stuff
+																			(E = erased, F = failed)
     				APID: Software ID for the process/SSM on the OBC that you are sending this command for.
 
     				COMMAND: Unique identifier for the command being sent (to be added in the future)
@@ -66,6 +66,8 @@ DEVELOPMENT HISTORY:
 
 11/22/2015			Started working on actually filling in the required functionality today.
 
+11/23/2015			Finishing up the code for the scheduling service today.
+
 """
 
 import os
@@ -81,6 +83,13 @@ class schedulingService(PUSService):
 	numCommands = 0
 	hSchedFile	= None
 	cSchedFile	= None
+	schedWaitTime = datetime.timedelta(0)
+	schedOperations ={
+		0x01			: "ADD SCHEDULE",
+		0x02			: "CLEAR SCHEDULE",
+		0x03			: "SCHEDULE REPORT REQUEST",
+		0x05			: "UPDATING SCHEDULE"
+	}
 
 	@classmethod
 	def run(self):
@@ -89,11 +98,14 @@ class schedulingService(PUSService):
 		@Note:		Since this class is a subclass of Process, when self.start() is executed on an
 					instance of this class, a process will be created with the contents of run() as the
 					main program.
+		@Note:		The scheduling service shall ask for a schedule report from the satellite in order to update
+					the schedule roughly once every minute.
 		"""
 		self.initialize(self)
 		while(1):
 			self.receiveCommandFromFifo(self.fifoFromGPR)
 			self.execCommands(self)
+			self.updateScheduleAutomatically(self)
 
 	@staticmethod
 	def initialize(self):
@@ -123,6 +135,12 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def addToSchedule(self):
+		"""
+		@purpose: 	This method is used
+		@param:		timeOut: This method will wait for a maximum of 'timeOut' milliseconds for the verification to be
+					received.
+		@param:		operation: is the code for the operation to be completed
+		"""
 		# When this command is received from the GPR, this means that changes have been made to the human schedule
 		# stored in memory.
 		# This method will then add all the new commands into the computer schedule (if they fit).
@@ -175,6 +193,13 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def addCommandToSchedule(self, time, apid, id, severity, param):
+		"""
+		@purpose: 	This method is used to write a single command to the computer schedule with the given parameters.
+		@param:		time: time for the command
+		@param:		apid: Process ID for which the command is meant for.
+		@param: 	severity: See file header for details.
+		@param:		param: Anything you want, can be utilized on the OBC if necessary.
+		"""
 		byte2 = (apid << 24) & (id << 16) & (severity << 8) & param
 		self.cSchedFile.write(str(time) + "\n")
 		self.cSchedFile.write(str(byte2) + "\n")
@@ -183,7 +208,14 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def sendCommandsToOBC(self, numNewCommands, commandArray):
-		# The maximum number of commands that will fit into a single PUS packet is 16.
+		"""
+		@purpose: 	Takes a given number of new commands, and the array that contains them, and proceeds to
+					parse them into individual command Arrays that the GPR can easily telecommand to the satellite.
+		@param:		numNewCommands: self-evident
+		@param:		commandArray: An array of ints where 2 adjacent INTs correspond to TIME and INT2 which together
+					form a command that can be stored in the computer schedule on either the ground station or OBC.
+		@Note: The maximum number of commands that will fit into a single PUS packet is 16.
+		"""
 		leftOver = 0
 		if(numNewCommands > 16):
 			numPackets = numNewCommands / 16
@@ -209,6 +241,8 @@ class schedulingService(PUSService):
 					self.currentCommand[j - 7] 	= tempInt2 & 0xFF000000
 				# Send the command to the GPR to be sent to the OBC
 				self.sendCurrentCommandToFifo(self.fifoToGPR)
+				if self.waitForTCVerification(1000, self.addSchedule) < 0:
+					return
 
 			if(leftOver):
 				self.printToCLI("SENDING COMMAND PACKET %s OF %s\n" %str(i + 1) %str(numPackets))
@@ -229,6 +263,8 @@ class schedulingService(PUSService):
 					self.currentCommand[j - 7] 	= tempInt2 & 0xFF000000
 					# Send the command to the GPR to be sent to the OBC
 				self.sendCurrentCommandToFifo(self.fifoToGPR)
+				if self.waitforTCVerification(1000, self.addSchedule) < 0:
+					return
 		else:
 			self.printToCLI("SENDING COMMAND PACKET %s OF %s\n" %str(1) %str(1))
 			self.clearCurrentCommand()
@@ -248,9 +284,115 @@ class schedulingService(PUSService):
 				self.currentCommand[j - 7] 	= tempInt2 & 0xFF000000
 				# Send the command to the GPR to be sent to the OBC
 			self.sendCurrentCommandToFifo(self.fifoToGPR)
+			if self.waitforTCVerication(1000, self.addSchedule) < 0:
+				return
 
 		self.printToCLI("UPLOADING NEW SCHEDULE COMPLETED\n")
 		return
+
+	@staticmethod
+	def clearTheSchedule(self):
+		tempWait = datetime.timedelta(0)
+		# First get a schedule report from the satellite in case some actions were completed very recently.
+		self.requestSchedReport()
+		self.clearCurrentCommand()
+		# Continue on with regular operation here for a maximum of one minute.
+		while (tempWait.seconds < 59) and (self.currentCommand[146] != self.schedReport):
+			self.receiveCommandFromFifo(self.fifoFromGPR)
+			self.execCommands()
+
+		if(self.currentCommand[146] != self.schedReport):
+			self.printToCLI("CANNOT CLEAR SCHEDULE, SCHEDULE REPORT TOOK TOO LONG TO COME BACK.\n")
+			self.logError("CANNOT CLEAR SCHEDULE, SCHEDULE REPORT TOOK TOO LONG TO COME BACK.")
+			self.execCommands() # Run the command which we might currently have.
+			self.clearCurrentCommand()
+			self.currentCommand[146] = self.clearSchedule
+			self.sendCurrentCommandToFifo(self.fifotoFDIR)		# Send the command to the FDIR task.
+		# Next, update the schedule.
+		elif (self.currentCommand[146] == self.schedReport):
+				self.processSchedReport()						# Updates the schedule with the incoming schedule report
+		# Next, attempt to clear the schedule on the satellite.
+		if self.clearTheScheduleH() < 0:
+			return
+		# Next, erase all the commands from the computer schedule
+		self.clearComputerSchedule()
+		# Next, set all commands which haven't been completed yet to E in the schedule
+		self.eraseCommandsInHumanSchedule()
+		# Lastly, send a command to the satellite to clear the schedule.
+		self.currentCommand[146] = self.clearSchedule
+		self.sendCurrentCommandToFifo()
+		self.waitForTCVerification(10000, self.clearSchedule)		# Erasing can take a long time
+		return
+
+	@staticmethod
+	def eraseCommandsInHumanSchedule(self):
+		for line in self.hSchedFile:
+			line = line.rstrip()
+			items = tempString.split()
+			# Get rid of the whitespace in each item from the schedule.
+			for item in items:
+				item = item.rstrip()
+				item = item.lstrip()
+
+	@staticmethod
+	def clearTheScheduleH(self):
+		self.currentCommand[146] = self.clearSchedule
+		self.sendCurrentCommandToFifo(self.fifotoGPR)
+		if self.waitForTCVerification(5000, self.clearSchedule) < 0:	# Wait max of 5s for the TC verification
+			return -1
+		else:
+			return 1
+
+	@staticmethod
+	def requestSchedReport(self):
+		self.currentCommand[146] = self.schedReportRequest
+		self.sendCurrentCommandToFifo(self.fifotoGPR)
+		self.waitForTCVerification(5000, self.schedReportRequest)
+		return
+
+	@staticmethod
+	def clearComputerSchedule(self):
+		self.cSchedFile.seek(0)
+		self.cSchedFile.truncate()
+		return
+
+	@staticmethod
+	def updateScheduleAutomatically(self):
+		if(self.schedWaitTime.seconds > 60):
+			self.schedWaitTime = datetime.timedelta(0)
+			self.requestSchedReport()
+			if(self.waitForTCVerification(5000, self.updatingSchedule) < 0):
+				return
+			self.printToCLI("SCHEDULE TO BE UPDATED AUTOMATICALLY\n")
+			self.logEventReport(1, self.updatingSchedAut, 0, 0, "SCHEDULE TO BE UPDATED AUTOMATICALLY")
+		return
+
+	@staticmethod
+	def waitForTCVerification(self, timeOut, operation):
+		"""
+		@purpose: 	This method is used to put the current service on hold until a successful TC Acceptance
+					report and TC Execution report have been received.
+		@param:		timeOut: This method will wait for a maximum of 'timeOut' milliseconds for the verification to be
+					received.
+		@param:		operation: is the code for the operation to be completed
+		"""
+		waitTime = datetime.timedelta(0)
+		while((waitTime.milliseconds < timeOut) and not self.tcAcceptVerification):
+			pass
+		if(waitTime > timeOut):
+			self.printToCLI("SCHEDULING SERVICE OPERATION: %s HAS FAILED\n" %self.schedOperations[operation])
+			self.logError("SCHEDULING SERVICE OPERATION: %s HAS FAILED" %self.schedOperations[operation])
+			self.currentCommand[146] = operation
+			self.sendCurrentCommandToFifo(self.fifotoFDIR)
+			return -1
+		else:
+			self.logEventReport(1, operation, 0, 0,
+								"SCHEDULING SERVICE OPERATION: %s HAS SUCCEEDED" %self.schedOperations[operation])
+			self.tcLock.acquire()
+			self.tcAcceptVerification = 0
+			self.tcExecuteVerification = 0
+			self.tcLock.release()
+			return 1
 
 	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock,
 							errorLock, day, hour, minute, second):
