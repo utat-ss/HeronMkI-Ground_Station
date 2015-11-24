@@ -6,7 +6,7 @@ AUTHOR:				Keenan Burnett
 PURPOSE:			This program is meant to start all other ground station software and
 					act as the interface between subsidiary services and the CLI / transceiver.
 
-FILE REFERENCES: 	PUSService.py, HKService.py, MemorySerice.py, FDIRService.py
+FILE REFERENCES: 	PUSService.py, HKService.py, MemoryService.py, FDIRService.py
 	(We write to logs located in /events /errors and /housekeeping)
 
 LIBRARIES USED:		os, datetime, multiprocessing
@@ -57,7 +57,7 @@ class groundPacketRouter(Process):
 	Creates other processes which are used to manage PUS services.
 	"""
 	# Global variables for each PUS Service Instance
-	selfprocessID 			= None
+	processID 				= None
 	serviceType 			= None
 	currentCommand 			= []
 	tmToDecode				= []
@@ -148,7 +148,7 @@ class groundPacketRouter(Process):
 	FDIRGround				= None
 	schedulingGround		= None
 	# Packet object
-	currentPacket			= None
+	currentPacket			= Puspacket()
 	lastPacket				= None
 
 	@classmethod
@@ -158,9 +158,9 @@ class groundPacketRouter(Process):
 		"""
 		self.initialize(self)
 
-		while(1):
-			# Check the transceiver for an incoming packet THIS NEEDS TO PUT INCOMING TELEMETRY
-			if( self.decodeTelemetry(self, self.currentPacket) < 0):
+		while 1:
+			# Check the transceiver for an incoming packet THIS NEEDS TO PUT INCOMING TELEMETRY INTO PACKET OBJECTS
+			if self.decodeTelemetry(self, self.currentPacket) < 0:
 				# Send an error message to FDIRGround
 				pass
 			# Check FIFOs for a required action
@@ -297,31 +297,30 @@ class groundPacketRouter(Process):
 		@Note:		If the TC verification is a success, then we set the corresponding tc verification
 					attribute for that service, otherwise we send an alert to the FDIR task (and set nothing for the service)
 		"""
-		verificationAPID = 0
 		verificationPacketID = self.currentCommand[135] << 8
 		verificationPacketID += self.currentCommand[134]
 		verificationPSC	= self.currentCommand[133] << 8
 		verificationPSC += self.currentCommand[132]
-		if((self.serviceSubTypeRx == 1) or (self.serviceSubTypeRx == 7)):				# TC verification is a successful type.
+		if (self.serviceSubType == 1) or (self.serviceSubType == 7):				# TC verification is a successful type.
 			verificationAPID = self.currentCommand[135]
 			self.currentCommand[146] = 1
-			if(verificationAPID == self.hkTaskID):
+			if verificationAPID == self.hkTaskID:
 				self.hkTCLock.acquire()
 				self.hkGroundService.tcAcceptVerification = (verificationPacketID << 16) & verificationPSC
 				self.hkTCLock.release()
-			if(verificationAPID == self.MemoryTaskID):
+			if verificationAPID == self.MemoryTaskID:
 				self.memTCLock.acquire()
 				self.memoryGroundService.tcAcceptVerification = (verificationPacketID << 16) & verificationPSC
 				self.memTCLock.release()
-			if(verificationAPID == self.schedulingTaskID):
+			if verificationAPID == self.schedulingTaskID:
 				self.schedTCLock.acquire()
 				self.schedulingGround.tcAcceptVerification = (verificationPacketID << 16) & verificationPSC
 				self.schedTCLock.release()
-			if(verificationAPID == self.FDIRGroundID):
+			if verificationAPID == self.FDIRGroundID:
 				self.fdirTCLock.acquire()
 				self.FDIRGround.tcAcceptVerification = (verificationPacketID << 16) & verificationPSC
 				self.fdirTCLock.release()
-		if((self.serviceSubTypeRx == 2) or (self.serviceSubTypeRx == 8)):				# Tc verification is a failure type.
+		if (self.serviceSubType == 2) or (self.serviceSubType == 8):				# Tc verification is a failure type.
 			self.logEventReport(2, self.TMExecutionFailed, 0, 0, "Telecommand Execution Failed. for PacketID: %s, PSC: %s" %str(verificationPacketID) % str(verificationPSC))
 			self.currentCommand[146] = self.TMExecutionFailed
 			self.currentCommand[146] = 3
@@ -364,8 +363,8 @@ class groundPacketRouter(Process):
 		currentPacket.ccsdsFlag			= (currentPacket.data[145] & 0x80) >> 7
 		currentPacket.packetVersion		= (currentPacket.data[145] & 0x70) >> 4
 		currentPacket.ack				= currentPacket.data[145] & 0x0F
-		currentPacket.serviceTypeRx		= currentPacket.data[144]
-		currentPacket.serviceSubTypeRx	= currentPacket.data[143]
+		currentPacket.serviceType		= currentPacket.data[144]
+		currentPacket.serviceSubType	= currentPacket.data[143]
 		currentPacket.sourceID			= currentPacket.data[142]
 		# Received Checksum Value
 		currentPacket.pec1 				= currentPacket.data[1] << 8
@@ -382,8 +381,8 @@ class groundPacketRouter(Process):
 	@staticmethod
 	def decodeTelemetryH(self, currentPacket):
 		"""
-		@purpose:   Helper to decodeTelemetry, this method looks at self.serviceTypeRx and
-					self.serviceSubTypeRx of the telemetry packet stored in tmToDecode[] and
+		@purpose:   Helper to decodeTelemetry, this method looks at self.serviceType and
+					self.serviceSubType of the telemetry packet stored in tmToDecode[] and
 					performs the actual routing of messages and executing of required actions.
 		"""
 		if not currentPacket:	# Method executed out of turn
@@ -398,32 +397,32 @@ class groundPacketRouter(Process):
 		self.currentCommand[138] = currentPacket.psc >> 8
 		self.currentCommand[137] = self.psc & 0x000000FF
 
-		if(currentPacket.serviceTypeRx == self.tcVerifyService):
+		if currentPacket.serviceType == self.tcVerifyService:
 			self.tcVerificationDecode()
-		if(currentPacket.serviceTypeRx == self.hkService):
-			self.currentCommand[146] = currentPacket.serviceSubTypeRx
+		if currentPacket.serviceType == self.hkService:
+			self.currentCommand[146] = currentPacket.serviceSubType
 			self.currentCommand[145] = self.currentCommand[135]
 			self.currentCommand[144] = self.currentCommand[134]
 			self.sendCurrentCommandToFifo(self.GPRTohkFifo)
-		if(currentPacket.serviceTypeRx == self.timeService):
+		if currentPacket.serviceType == self.timeService:
 			self.syncWithIncomingTime()
-		if(currentPacket.serviceTypeRx == self.kService):
-			self.currentCommand[146] = currentPacket.serviceSubTypeRx
+		if currentPacket.serviceType == self.kService:
+			self.currentCommand[146] = currentPacket.serviceSubType
 			self.sendCurrentCommandToFifo(self.GPRtoschedFifo)
-		if(currentPacket.serviceTypeRx == self.eventReportService):
+		if currentPacket.serviceType == self.eventReportService:
 			self.checkIncomingEventReport()
-		if(currentPacket.serviceTypeRx == self.memService):
+		if currentPacket.serviceType == self.memService:
 			self.currentCommand[146] = self.memService
 			self.currentCommand[145] = currentPacket.packetID
 			self.currentCommand[144] = currentPacket.psc
 			self.currentCommand[143] = currentPacket.sequenceFlags
 			self.currentCommand[142] = currentPacket.sequenceCount
 			self.sendCurrentCommandToFifo(self.GPRTomemFifo)
-		if(currentPacket.serviceTypeRx == self.fdirService):
+		if currentPacket.serviceType == self.fdirService:
 			self.currentCommand[146] = self.fdirService
 			self.sendCurrentCommandToFifo(self.GPRTofdirFifo)
 
-		currentPacket = currentPacket.nextPacket		# Move to the next packet in the linked list, may be None.
+		self.currentPacket = self.currentPacket.nextPacket		# Move to the next packet in the linked list, may be None.
 		return
 
 	@staticmethod
@@ -439,7 +438,7 @@ class groundPacketRouter(Process):
 
 		self.logEventReport(severity, reportID, p1, p0, "Satellite event report received.")
 		# If the event report was a failure, forward it to the FDIR task.
-		if(self.serviceSubTypeRx > 1):
+		if self.serviceSubType > 1:
 			self.currentCommand[146] = reportID
 			self.currentCommand[145] = severity
 			self.sendCurrentCommandToFifo(self.GPRTofdirFifo)
@@ -464,7 +463,7 @@ class groundPacketRouter(Process):
 
 		timeDelta = abs(localAbsMinutes - incomAbsMinutes)	# Difference in minutes between ground time and satellite time
 
-		if(timeDelta > 90):		# If the difference in time is greater than one -approximate- orbit, something is wrong.
+		if timeDelta > 90:		# If the difference in time is greater than one -approximate- orbit, something is wrong.
 			self.printToCLI("Satellite time is currently out of sync.\n")
 			# Store the current ground time.
 			self.oldAbsTime = self.absTime
@@ -486,7 +485,6 @@ class groundPacketRouter(Process):
 		We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
 		Each subquesequent byte is then placed in the fifo followed by a newline character.
 		"""
-		tempString = None
 		fifo.write("START\n")
 		for i in range(0, self.dataLength + 10):
 			tempString = str(self.currentCommand[i]) + "\n"
@@ -506,45 +504,45 @@ class groundPacketRouter(Process):
 		if not currentPacket:	# Method executed out of turn
 			return -1
 
-		if(currentPacket.packetLengthRx != self.packetLength):
+		if currentPacket.packetLengthRx != self.packetLength:
 			self.printToCLI("Incoming Telemetry Packet Failed\n")
 			self.logError("TM PacketID: %s, PSC: %s had an incorrect packet length" %str(currentPacket.packetID) %str(currentPacket.psc))
 			return -1
 
-		if(currentPacket.pec0 != currentPacket.pec1):
+		if currentPacket.pec0 != currentPacket.pec1:
 			self.printToCLI("Incoming Telemetry Packet Failed\n")
 			self.logError("TM PacketID: %s, PSC: %s failed the checksum test. PEC1: %s, PEC0: %s"
 							%str(currentPacket.packetID) %str(currentPacket.psc) %str(currentPacket.pec1) %str(currentPacket.pec0))
 			return -1
 
-		if((currentPacket.serviceTypeRx != 1) and (currentPacket.serviceTypeRx != 3) and (currentPacket.serviceTypeRx != 5)
-		and (currentPacket.serviceTypeRx != 6) and (currentPacket.serviceTypeRx != 9) and (currentPacket.serviceTypeRx != 69)):
+		if((currentPacket.serviceType != 1) and (currentPacket.serviceType != 3) and (currentPacket.serviceType != 5)
+		and (currentPacket.serviceType != 6) and (currentPacket.serviceType != 9) and (currentPacket.serviceType != 69)):
 			self.printToCLI("Incoming Telemetry Packet Failed\n")
 			self.logError("TM PacketID: %s, PSC: %s had an incorrect serviceType" %str(currentPacket.packetID) %str(currentPacket.psc))
 			return -1
 
-		if(currentPacket.serviceTypeRx == self.tcVerifyService):
-			if((currentPacket.serviceSubTypeRx != 1) and (currentPacket.serviceSubTypeRx != 2) and (currentPacket.serviceSubTypeRx != 7) and (currentPacket.serviceSubTypeRx != 8)):
+		if currentPacket.serviceType == self.tcVerifyService:
+			if (currentPacket.serviceSubType != 1) and (currentPacket.serviceSubType != 2) and (currentPacket.serviceSubType != 7) and (currentPacket.serviceSubType != 8):
 				self.printToCLI("Incoming Telemetry Packet Failed\n")
 				self.logError("TM PacketID: %s, PSC: %s had an incorrect serviceSubType" %str(currentPacket.packetID) %str(currentPacket.psc))
 				return -1
 
-		if(currentPacket.serviceTypeRx == self.hkService):
-			if((currentPacket.serviceSubTypeRx != 10) and (currentPacket.serviceSubTypeRx != 12) and (currentPacket.serviceSubTypeRx != 25) and (currentPacket.serviceSubTypeRx != 26)):
+		if currentPacket.serviceType == self.hkService:
+			if (currentPacket.serviceSubType != 10) and (currentPacket.serviceSubType != 12) and (currentPacket.serviceSubType != 25) and (currentPacket.serviceSubType != 26):
 				self.printToCLI("Incoming Telemetry Packet Failed\n")
 				self.logError("TM PacketID: %s, PSC: %s had an incorrect serviceSubType" %str(currentPacket.packetID) %str(currentPacket.psc))
 				return -1
-			if((currentPacket.apid != self.HKGroundID) and (currentPacket.apid != self.FDIRGroundID)):
+			if(currentPacket.apid != self.HKGroundID) and (currentPacket.apid != self.FDIRGroundID):
 				self.printToCLI("Incoming Telemetry Packet Failed\n")
 				self.logError("TM PacketID: %s, PSC: %s had an invalid APID" %str(currentPacket.packetID) %str(currentPacket.psc))
 				return -1
 
-		if(currentPacket.serviceTypeRx == self.memService):
-			if((currentPacket.serviceSubTypeRx != 6) and (currentPacket.serviceSubTypeRx != 10)):
+		if currentPacket.serviceType == self.memService:
+			if(currentPacket.serviceSubType != 6) and (currentPacket.serviceSubType != 10):
 				self.printToCLI("Incoming Telemetry Packet Failed\n")
 				self.logError("TM PacketID: %s, PSC: %s had an incorrect serviceSubType" %str(currentPacket.packetID) %str(currentPacket.psc))
 				return -1
-			if(currentPacket.apid != self.MemGroundID):
+			if currentPacket.apid != self.MemGroundID:
 				self.printToCLI("Incoming Telemetry Packet Failed\n")
 				self.logError("TM PacketID: %s, PSC: %s had an invalid APID" %str(currentPacket.packetID) %str(currentPacket.psc))
 				return -1
@@ -553,44 +551,43 @@ class groundPacketRouter(Process):
 			address += currentPacket.data[135] << 8
 			address += currentPacket.data[134]
 
-			if(currentPacket.data[138] > 1):
+			if currentPacket.data[138] > 1:
 				self.printToCLI("Incoming Telemetry Packet Failed\n")
 				self.logError("TM PacketID: %s, PSC: %s had an incorrect memoryID" %str(currentPacket.packetID) %str(currentPacket.psc))
 				return -1
-			if((currentPacket.data[138] == 1) and (address > 0xFFFFF)):
+			if (currentPacket.data[138] == 1) and (address > 0xFFFFF):
 				self.printToCLI("Incoming Telemetry Packet Failed\n")
 				self.logError("TM PacketID: %s, PSC: %s had an invalid address" %str(currentPacket.packetID) %str(currentPacket.psc))
 				return -1
 
-		if(currentPacket.serviceTypeRx == self.timeService):
-			if((currentPacket.serviceSubTypeRx != 2)):
+		if currentPacket.serviceType == self.timeService:
+			if currentPacket.serviceSubType != 2:
 				self.printToCLI("Incoming Telemetry Packet Failed\n")
 				self.logError("TM PacketID: %s, PSC: %s had an incorrect serviceSubType" %str(currentPacket.packetID) %str(currentPacket.psc))
 				return -1
-			if(currentPacket.apid != self.TimeGroundID):
+			if currentPacket.apid != self.TimeGroundID:
 				self.printToCLI("Incoming Telemetry Packet Failed\n")
 				self.logError("TM PacketID: %s, PSC: %s had an invalid APID" %str(currentPacket.packetID) %str(currentPacket.psc))
 				return -1
-		if(currentPacket.serviceTypeRx == self.kService):
-			length = currentPacket.data[136]
-			if((currentPacket.serviceSubTypeRx != 4)):
+		if currentPacket.serviceType == self.kService:
+			if currentPacket.serviceSubType != 4:
 				self.printToCLI("Incoming Telemetry Packet Failed\n")
 				self.logError("TM PacketID: %s, PSC: %s had an incorrect serviceSubType" %str(currentPacket.packetID) %str(currentPacket.psc))
 				return -1
-			if(currentPacket.apid != self.schedGroundID):
+			if currentPacket.apid != self.schedGroundID:
 				self.printToCLI("Incoming Telemetry Packet Failed\n")
 				self.logError("TM PacketID: %s, PSC: %s had an invalid APID" %str(currentPacket.packetID) %str(currentPacket.psc))
 				return -1
 
-		if(currentPacket.version != 1):
+		if currentPacket.version != 1:
 			self.printToCLI("Incoming Telemetry Packet Failed\n")
 			self.logError("TM PacketID: %s, PSC: %s had an incorrect version" %str(currentPacket.packetID) %str(currentPacket.psc))
 			return -1
-		if(currentPacket.ccsdsFlag != 1):
+		if currentPacket.ccsdsFlag != 1:
 			self.printToCLI("Incoming Telemetry Packet Failed\n")
 			self.logError("TM PacketID: %s, PSC: %s had an incorrect ccsdsFlag" %str(currentPacket.packetID) %str(currentPacket.psc))
 			return -1
-		if(currentPacket.packetVersion != 1):
+		if currentPacket.packetVersion != 1:
 			self.printToCLI("Incoming Telemetry Packet Failed\n")
 			self.logError("TM PacketID: %s, PSC: %s had an incorrect packet version" %str(currentPacket.packetID) %str(currentPacket.psc))
 			return -1
@@ -631,13 +628,13 @@ class groundPacketRouter(Process):
 		self.GPRTofdirFifo.close()
 
 		# Kill all the children
-		if(self.hkGroundService.is_alive()):
+		if self.hkGroundService.is_alive():
 			self.hkGroundService.terminate()
-		if(self.memoryGroundService.is_alive()):
+		if self.memoryGroundService.is_alive():
 			self.memoryGroundService.terminate()
-		if(self.FDIRGround.is_alive()):
+		if self.FDIRGround.is_alive():
 			self.FDIRGround.terminate()
-		if(self.schedulingGround.as_alive()):
+		if self.schedulingGround.as_alive():
 			self.schedulingGround.terminate()
 
 		# Delete all the FIFO files that were created
@@ -682,9 +679,9 @@ class groundPacketRouter(Process):
 		self.eventLog.write(str(reportID) + "\t,\t")
 		self.eventLog.write(str(param1) + "\t,\t")
 		self.eventLog.write(str(param0) + "\t,\t")
-		if(message is not None):
+		if message is not None:
 			self.eventLog.write(str(message) + "\n")
-		if(message is None):
+		if message is None:
 			self.eventLog.write("\n")
 		self.eventLock.release()
 		return
@@ -706,7 +703,6 @@ class groundPacketRouter(Process):
 
 	@staticmethod
 	def clearCurrentCommand(self):
-		i = 0
 		for i in range(0, (self.dataLength + 10)):
 			self.currentCommand[i] = 0
 		return
