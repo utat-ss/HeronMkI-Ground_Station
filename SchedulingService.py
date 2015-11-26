@@ -253,7 +253,7 @@ class schedulingService(PUSService):
 		@param:		param: Anything you want, can be utilized on the OBC if necessary.
 		"""
 		int2 = (apid << 24) & (id << 16) & (severity << 8) & ((cID & 0xFF00) >> 8)
-		int3 = ((ciD & 0x00FF) << 24) & (status << 16) & int((param & 0xFFFF00000000) >> 32)
+		int3 = ((cID & 0x00FF) << 24) & (status << 16) & int((param & 0xFFFF00000000) >> 32)
 		int4 = int(param & 0x0000FFFFFFFF)
 		self.cSchedFile.seek(0, 2)	# Go to the end of the file.
 		self.cSchedFile.write(str(time) + "\n")

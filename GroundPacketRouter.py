@@ -96,9 +96,9 @@ class groundPacketRouter(Process):
 	schedReportRequest		= 3
 	schedReport 			= 4
 	# Event Report ID
-	kickComFromSchedule		= 1
-	bitFlipDetected			= 2
-	memoryWashFinished		= 3
+	kickComFromSchedule		= 0x01
+	bitFlipDetected			= 0x02
+	memoryWashFinished		= 0x03
 	hkgroundinitialized		= 0xFF
 	memgroundinitialized	= 0xFE
 	fdirgroundinitialized  	= 0xFD
@@ -107,12 +107,18 @@ class groundPacketRouter(Process):
 	timeReportReceived		= 0xFA
 	timeOutOfSync			= 0xF9
 	hkParamIncorrect		= 0xF8
-	hkintervalincorrect		= 0xF7
+	hkIntervalIncorrect		= 0xF7
 	hkNumParamsIncorrect	= 0xF6
 	loadingFileToSat		= 0xF5
 	loadOperatonFailed		= 0xF4
 	loadCompleted			= 0xF3
 	dumpPacketWrong			= 0xF2
+	dumpCompleted			= 0xF1
+	schedGroundInitialized	= 0xF0
+	updatingSchedAut		= 0xEF
+	scheduleCleared			= 0xEE
+	schedCommandCompleted   = 0xED
+	numCommandsWrong		= 0xEC
 	# IDs for Communication:
 	comsID					= 0x00
 	epsID					= 0x01
