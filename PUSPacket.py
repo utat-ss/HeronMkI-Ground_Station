@@ -57,3 +57,7 @@ class Puspacket:
         """
         @purpose: Initialization method for the Ground Packet Router Class
         """
+        pass
+
+if __name__ == '__main__':
+    pass

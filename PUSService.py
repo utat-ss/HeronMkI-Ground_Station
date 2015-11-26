@@ -78,6 +78,7 @@ class PUSService(Process):
 	clearSchedule			= 2
 	schedReportRequest		= 3
 	schedReport 			= 4
+	updatingSchedule		= 5
 	# Event Report ID
 	kickComFromSchedule		= 0x01
 	bitFlipDetected			= 0x02
@@ -98,6 +99,10 @@ class PUSService(Process):
 	dumpPacketWrong			= 0xF2
 	dumpCompleted			= 0xF1
 	schedGroundInitialized	= 0xF0
+	updatingSchedAut		= 0xEF
+	scheduleCleared			= 0xEE
+	schedCommandCompleted   = 0xED
+	numCommandsWrong		= 0xEC
 	# IDs for Communication:
 	comsID					= 0x00
 	epsID					= 0x01
@@ -186,7 +191,6 @@ class PUSService(Process):
 		"""
 		@purpose:   Clears the array currentCommand[]
 		"""
-		i = 0
 		for i in range(0, (self.dataLength + 10)):
 			self.currentCommand[i] = 0
 		return
@@ -216,9 +220,9 @@ class PUSService(Process):
 		self.eventLog.write(str(reportID) + "\t,\t")
 		self.eventLog.write(str(param1) + "\t,\t")
 		self.eventLog.write(str(param0) + "\t,\t")
-		if(message is not None):
+		if message is not None:
 			self.eventLog.write(str(message) + "\n")
-		if(message is None):
+		if message is None:
 			self.eventLog.write("\n")
 		self.eventLock.release()
 		return
@@ -284,14 +288,13 @@ class PUSService(Process):
 		length of 147 bytes & places it into the array self.currentCommand[].
 		@Note: We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
 		"""
-		i = 0
-		if(os.path.getsize(fifo) > 152):
+		if os.path.getsize(fifo) > 152:
 			i = 0
-			if(self.fifoFromGPR.readline() == "START\n"):
+			if self.fifoFromGPR.readline() == "START\n":
 				# Start reading in the command.
 				newString = fifo.readline()
 				newString = newString.rstrip()
-				while((newString != "STOP") and (i < (self.dataLength + 11))):
+				while (newString != "STOP") and (i < (self.dataLength + 11)):
 					self.currentCommand[i] = int(newString)
 					newString = self.fifoFromGPR.readline()
 					newString = newString.rstrip()

@@ -68,7 +68,7 @@ class hkService(PUSService):
 		"""
 		self.initialize(self)
 
-		while(1):
+		while 1:
 			self.receiveCommandFromFifo(self.fifoFromGPR)		# If command in FIFO, places it in self.currentCommand[]
 			self.execCommands(self)										# Deals with commands from GPR
 		return				# This should never be reached.
@@ -96,19 +96,19 @@ class hkService(PUSService):
 		@purpose:   After a command has been received in the FIFO, this function parses through it
 					and performs different actions based on what is received.
 		"""
-		if(self.currentCommand[146] == self.hkDefinitionReport):
+		if self.currentCommand[146] == self.hkDefinitionReport:
 			self.logHkParameterReport()
-		if(self.currentCommand[146] == self.hkReport):
+		if self.currentCommand[146] == self.hkReport:
 			self.logHKReport()
-		if(self.currentCommand[146] == self.newHKDefinition):
+		if self.currentCommand[146] == self.newHKDefinition:
 			self.setAlternateHKDefinition()
-		if(self.currentCommand[146] == self.clearHKDefinition):
+		if self.currentCommand[146] == self.clearHKDefinition:
 			self.setHKDefinitionsDefault()
-		if(self.currentCommand[146] == self.enableParamReport):
+		if self.currentCommand[146] == self.enableParamReport:
 			self.enableParamReport()
-		if(self.currentCommand[146] == self.disableParamReport):
+		if self.currentCommand[146] == self.disableParamReport:
 			self.disableParamReport()
-		if(self.currentCommand[146] == self.reportHKDefinitions):
+		if self.currentCommand[146] == self.reportHKDefinitions:
 			self.requestHKParamReport()
 		self.clearCurrentCommand()
 		return
@@ -143,29 +143,29 @@ class hkService(PUSService):
 		sID = self.currentCommand[self.dataLength - 1]
 		collectionInterval = self.currentCommand[145]
 		numParameters = self.currentCommand[144]
-		if (sID != self.currenthkdefinitionf):
+		if sID != self.currenthkdefinitionf:
 			self.logError("Local Housekeeping Parameter definition does not match satellite")
 			self.currentCommand[146] = self.hkParamIncorrect
 			self.currentCommand[146] = 3
 			self.sendCurrentCommandToFifo(self.fifotoFDIR)
-		if (sID):
-			if (collectionInterval != self.collectionInterval1):
+		if sID:
+			if collectionInterval != self.collectionInterval1:
 				self.logError("Local HK collection Interval definition does not match satellite")
 				self.currentCommand[146] = self.hkIntervalIncorrect
 				self.currentCommand[146] = 3
 				self.sendCurrentCommandToFifo(self.fifotoFDIR)
-			if (numParameters != self.numParameters1):
+			if numParameters != self.numParameters1:
 				self.logError("Local HK number of parameters does not match satellite")
 				self.currentCommand[146] = self.hkNumParamsIncorrect
 				self.currentCommand[146] = 3
 				self.sendCurrentCommandToFifo(self.fifotoFDIR)
 		if not sID:
-			if (collectionInterval != self.collectionInterval0):
+			if collectionInterval != self.collectionInterval0:
 				self.logError("Local HK collection Interval definition does not match satellite")
 				self.currentCommand[146] = self.hkIntervalIncorrect
 				self.currentCommand[146] = 3
 				self.sendCurrentCommandToFifo(self.fifotoFDIR)
-			if (numParameters != self.numParameters0):
+			if numParameters != self.numParameters0:
 				self.logError("Local HK number of parameters does not match satellite")
 				self.currentCommand[146] = self.hkNumParamsIncorrect
 				self.currentCommand[146] = 3
@@ -193,7 +193,7 @@ class hkService(PUSService):
 					which corresponds to being 16 bits on the satellite.
 		@Note:		We expect housekeeping report to located in currentCommand[] at this point.
 		"""
-		if(self.currenthkdefinitionf):
+		if self.currenthkdefinitionf:
 			numParameters = self.numParameters1
 		else:
 			numParameters = self.numParameters0
@@ -262,7 +262,7 @@ class hkService(PUSService):
 		if os.path.exists(defPath):
 			hkdef = open(defPath, "rb")
 			sID = int(hkdef.read(1))
-			if(sID != 1):
+			if sID != 1:
 				self.printtoCLI("sID in hkDefinition1.txt was not 1, denying definition update")
 				self.logError("sID in hkDefinition1.txt was not 1, denying definition update\n")
 				return
@@ -272,7 +272,7 @@ class hkService(PUSService):
 			self.hkDefinition1[135] = self.collectionInterval1
 			hkdef.seek(2)
 			numParameters1 = int(hkdef.read(2))
-			if(numParameters1 > 64):
+			if numParameters1 > 64:
 				self.logError("Proposed alternate HK definition has numParameters > 64, denying definition update\n")
 				return
 			self.numParameters1 = numParameters1
@@ -305,10 +305,8 @@ class hkService(PUSService):
 		super(hkService, self).__init__(path1, path2, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second)
 		self.processID = 0x10
 		self.serviceType = 3
-
 		# Log for Housekeeping Parameter Reports
 		self.hkDefLog = open(hkDefPath, "a+")
-
 		# FIFOs for communication with the FDIR service
 		self.fifotoFDIR = open(path3, "wb")
 		self.fifofromFDIR = open(path4, "rb")

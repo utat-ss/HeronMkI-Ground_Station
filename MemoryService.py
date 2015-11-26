@@ -83,7 +83,7 @@ class MemoryService(PUSService):
 					main program.
 		"""
 		self.initialize(self)
-		while(1):
+		while 1:
 			self.receiveCommandFromFifo(self.fifoFromGPR)		# If command in FIFO, places it in self.currentCommand[]
 			self.execCommands(self)								# Deals with commands from GPR
 		return				# This should never be reached.
@@ -103,28 +103,33 @@ class MemoryService(PUSService):
 		@purpose:   After a command has been received in the FIFO, this function parses through it
 					and performs different actions based on what is received.
 		"""
-		if(self.currentCommand[146] == self.memoryLoadABS):
+		if self.currentCommand[146] == self.memoryLoadABS:
 			self.loadToSatelliteMemory()
-		if(self.currentCommand[146] == self.dumpRequestABS):
+		if self.currentCommand[146] == self.dumpRequestABS:
 			self.sendDumpRequest()
-		if(self.currentCommand[146] == self.memoryDumpABS):
+		if self.currentCommand[146] == self.memoryDumpABS:
 			self.processMemoryDump()
-		if(self.currentCommand[146] == self.checkMemRequest):
+		if self.currentCommand[146] == self.checkMemRequest:
 			self.sendCheckMemRequest()
-		if(self.currentCommand[146] == self.memoryCheckABS):
+		if self.currentCommand[146] == self.memoryCheckABS:
 			self.processMemoryCheck()
 		self.clearCurrentCommand()
 		return
 
 	@staticmethod
 	def loadToSatelliteMemory(self):
-		# The name of the file should be placed in currentCommand[145] ... until done
-		# (obviously don't make the filename over 146 characters.)
+		"""
+		@purpose: 	When a command is received to load some data to the memory on the OBC, this method will handle
+					breaking up the data into individual packets, sending them to GPR so they may be telecommanded,
+					and keeping track of packets being recevied.
+		@Note: 		The GPR should place the name of the file being read in currentCommand[145] ... until done.
+					(obviously you shouldn't make the length of the filename over 146 characters.
+		"""
 		fileName = None
 		i = 145
 		x = 0
 		# Load the name of the file into fileName
-		while(self.currentCommand[i]):
+		while self.currentCommand[i]:
 			fileName += self.currentCommand[i]
 			i -= 1
 
@@ -169,11 +174,10 @@ class MemoryService(PUSService):
 			# Send the currentCommand[] to GPR.
 			self.printToCLI("UPLOADING: %s OF %s PACKETS FOR MEM LOAD\n" %str(numPackets) %str(numPackets))
 			self.sendCurrentCommandToFifo(self.fifoToGPR)
-			x = self.waitForTCVerification()
-			if (x < 0):
+			if self.waitForTCVerification(5000, self.memoryLoadABS) < 0:
 				return
 
-		if(leftOver):
+		if leftOver:
 			self.currentCommand[146] = self.memoryLoadABS
 			self.currentCommand[145] = numPackets - i
 			self.currentCommand[136] = memoryID
@@ -194,8 +198,8 @@ class MemoryService(PUSService):
 			# Send the currentCommand[] to GPR.
 			self.printToCLI("UPLOADING: %s OF %s PACKETS FOR MEM LOAD\n" %str(numPackets) %str(numPackets))
 			self.sendCurrentCommandToFifo(self.fifoToGPR)
-			x = self.waitForTCVerification(5000)
-			if (x < 0):
+			x = self.waitForTCVerification(5000, self.memoryLoadABS)
+			if x < 0:
 				return
 			self.printToCLI("UPLOADING COMPLETE FOR MEM LOAD\n")
 			self.logEventReport(1, self.loadCompleted, 0, 0, "UPLOAD COMPLETE FOR MEM LOAD")
@@ -203,7 +207,10 @@ class MemoryService(PUSService):
 
 	@staticmethod
 	def sendDumpRequest(self):
-		# Just send the command back to GPR so that it can turn this into a TC
+		"""
+		@purpose: 	This method will send a command array to the GPR so that a telecommand may be created
+					requested a memory dump.
+		"""
 		self.printToCLI("SENDING A DUMP REQUEST TO THE SATELLITE...\n")
 		# Store the number of packets which are being requested.
 		length = self.currentCommand[131] << 24
@@ -218,17 +225,20 @@ class MemoryService(PUSService):
 		self.currentCommand[146] = self.dumpRequestABS
 		self.sendCurrentCommandToFifo(self.fifoToGPR)
 		x = self.waitForTCVerification(5000, self.dumpRequestABS)	# Wait <= 5s for the command to be accepted/executed
-		if(x > 0):
+		if x > 0:
 			self.printToCLI("DUMP REQUEST ACCEPTED AND STARTED...\n")
 		return
 
 	@staticmethod
 	def processMemoryDump(self):
-		# A memory dump packet has been received, parse it and possibly store it.
+		"""
+		@purpose: 	When a memory-dump packet is received, this method is tasked with checking if we can/should
+					store it in memory. Things that need be checked include the sequence flags / count.
+		"""
 		obcSequenceFlags	= self.currentCommand[143]
 		obcSequenceCount	= self.currentCommand[142]
 
-		if (obcSequenceFlags == 0x01):
+		if obcSequenceFlags == 0x01:
 			if self.localFlags == -1:	# The First packet of several.
 				self.localSequence = obcSequenceCount
 				self.sequenceOffset = obcSequenceCount
@@ -239,7 +249,7 @@ class MemoryService(PUSService):
 				self.localSequence = 0
 				self.localFlags = -1
 				return
-		if (obcSequenceFlags == 0x11):
+		if obcSequenceFlags == 0x11:
 			if self.localFlags == -1:	# The First packet of several.
 				self.localSequence = obcSequenceCount
 				self.localFlags = obcSequenceFlags
@@ -249,8 +259,8 @@ class MemoryService(PUSService):
 				self.localSequence = 0
 				self.localFlags = -1
 				return
-		if (obcSequenceFlags == 0x00):
-			if ((self.localFlags == 0x01) or (self.localFlags == 0x00) and (self.localSequence < obcSequenceCount)):
+		if obcSequenceFlags == 0x00:
+			if (self.localFlags == 0x01) or (self.localFlags == 0x00) and (self.localSequence < obcSequenceCount):
 				self.localSequence = obcSequenceCount
 				self.localFlags = obcSequenceFlags
 			else:
@@ -259,8 +269,8 @@ class MemoryService(PUSService):
 				self.localSequence = 0
 				self.localFlags = -1
 				return
-		if(obcSequenceFlags == 0x11):
-			if ((self.localFlags == 0x00) and (self.localSequence < obcSequenceCount)):
+		if obcSequenceFlags == 0x11:
+			if (self.localFlags == 0x00) and (self.localSequence < obcSequenceCount):
 				self.localSequence = obcSequenceCount
 				self.localFlags = obcSequenceFlags
 			else:
@@ -271,20 +281,20 @@ class MemoryService(PUSService):
 				return
 
 		# Print something meaningful to the CLI.
-		if(self.localFlags == 0x01):
+		if self.localFlags == 0x01:
 			self.printToCLI("DOWNLOADING PACKET 1 OF %s FOR MEM DUMP\n" %str(self.packetsRequested))
-		if(self.localFlags == 0x11):
+		if self.localFlags == 0x11:
 			self.printToCLI("DOWNLOADING PACKET 1 of 1 FOR MEM DUMP\n")
-		if(self.localFlags == 0x00):
+		if self.localFlags == 0x00:
 			packetNum = obcSequenceCount - self.sequenceOffset + 1
 			self.printToCLI("DOWNLOADING PACKET %s OF %s FOR MEM DUMP\n" %str(packetNum) %str(self.packetsRequested))
-		if(self.localFlags == 0x10):
+		if self.localFlags == 0x10:
 			packetNum = obcSequenceCount - self.sequenceOffset + 1
 			self.printToCLI("DOWNLOADING PACKET %s OF %s FOR MEM DUMP\n" %str(packetNum) %str(self.packetsRequested))
 			self.printToCLI("DOWNLOAD COMPLETE FOR MEM DUMP %s\n" %str(self.dumpCount))
 			self.logEventReport(1, self.dumpCompleted, 0, 0, "DOWNLOAD COMPLETE FOR MEM DUMP %s" %str(self.dumpCount))
-
-		if(self.localFlags == 0x01 or self.localFlags == 0x11):
+		# Write the contents of the incoming PUS packet into a memory dump file.
+		if self.localFlags == 0x01 or self.localFlags == 0x11:
 			memPath = "/memory/dumps/memdump%s" %str(self.dumpCount)		#Create a new file for the mem dump.
 			if os.path.exists(memPath):
 				self.dumpFile = open(memPath, "ab+")
@@ -304,10 +314,10 @@ class MemoryService(PUSService):
 			self.dumpFile.write(str(length) + "\n")							# And then length (in bytes, decimal)
 			for i in range(0, 128):
 				self.dumpFile.write(str(self.currentCommand[i]) + "\n")
-		if(self.localFlags == 0x00 or self.localFlags == 0x10):
+		if self.localFlags == 0x00 or self.localFlags == 0x10:
 			for i in range(0, 128):
 				self.dumpFile.write(str(self.currentCommand[i]) + "\n")
-		if(self.localFlags == 0x10):
+		if self.localFlags == 0x10:
 			self.localSequence = 0
 			self.localFlags = -1
 			self.dumpCount += 1
@@ -315,12 +325,19 @@ class MemoryService(PUSService):
 
 	@staticmethod
 	def sendCheckMemRequest(self):
+		"""
+		@purpose: 	This method sends a command to the GPR for a telecommand of this king to be sent to the satellite
+		"""
 		self.currentCommand[146] = self.checkMemRequest
 		self.sendCurrentCommandToFifo(self.fifoToGPR)
 		self.waitForTCVerification(5000, self.checkMemRequest)
 
 	@staticmethod
 	def processMemoryCheck(self):
+		"""
+		@purpose: 	When a memory-check packet is received, this method parses through it and stores it in memory.
+		@Note:		The file in which the checksum is stored : "/memory/checks/memcheck%s" %str(self.checkCount)
+		"""
 		self.currentCommand[146] = self.memoryCheckABS
 		# Get the address and length of the checksum that was computed
 		address = self.currentCommand[135] << 24
@@ -357,11 +374,17 @@ class MemoryService(PUSService):
 
 	@staticmethod
 	def waitForTCVerification(self, timeOut, operation):
-		# TimeOut should be in terms of milliseconds.
+		"""
+		@purpose: 	This method is used to put the current service on hold until a successful TC Acceptance
+					report and TC Execution report have been received.
+		@param:		timeOut: This method will wait for a maximum of 'timeOut' milliseconds for the verification to be
+					received.
+		@param:		operation: is the code for the operation to be completed
+		"""
 		waitTime = datetime.timedelta(0)
-		while((waitTime.milliseconds < timeOut) and (not self.tcAcceptVerification or not self.tcExecuteVerification)):
+		while (waitTime.milliseconds < timeOut) and (not self.tcAcceptVerification or not self.tcExecuteVerification):
 			pass
-		if(waitTime > timeOut):
+		if waitTime > timeOut:
 			self.printToCLI("MEMORY SERVICE OPERATION: %s HAS FAILED\n" %self.memoryOperations[operation])
 			self.logError("MEMORY SERVICE OPERATION: %s HAS FAILED" %self.memoryOperations[operation])
 			self.currentCommand[146] = operation
