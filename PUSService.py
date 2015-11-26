@@ -78,7 +78,9 @@ class PUSService(Process):
 	clearSchedule			= 2
 	schedReportRequest		= 3
 	schedReport 			= 4
-	updatingSchedule		= 5
+	pauseScheduling			= 5
+	resumeScheduling		= 6
+	updatingSchedule		= 7
 	# Event Report ID
 	kickComFromSchedule		= 0x01
 	bitFlipDetected			= 0x02

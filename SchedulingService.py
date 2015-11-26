@@ -82,6 +82,9 @@ DEVELOPMENT HISTORY:
 					Adding STATUS, and CID to each command. Each command is now 16B, the max number of commands
 					in the schedule is now 511.
 
+11/26/2015
+					Alright, as far as I can tell, the scheduling service code is complete.
+
 """
 
 import os
@@ -110,7 +113,9 @@ class schedulingService(PUSService):
 		0x01			: "ADD SCHEDULE",
 		0x02			: "CLEAR SCHEDULE",
 		0x03			: "SCHEDULE REPORT REQUEST",
-		0x05			: "UPDATING SCHEDULE"
+		0x05			: "PAUSING SCHEDULED OPERATIONS",
+		0x06			: "RESUMING SCHEDULED OPERATIONS",
+		0x07			: "UPDATING SCHEDULE"
 	}
 
 	@classmethod
@@ -128,6 +133,7 @@ class schedulingService(PUSService):
 			self.receiveCommandFromFifo(self.fifoFromGPR)
 			self.execCommands(self)
 			self.updateScheduleAutomatically(self)
+		return
 
 	@staticmethod
 	def initialize(self):
@@ -155,6 +161,10 @@ class schedulingService(PUSService):
 			self.processSchedReport()
 		if self.currentCommand[146] == self.schedCommandCompleted:		# Event reports on completed command should be going here.
 			self.updateScheduleWithCommandStatus()
+		if self.currentCommand[146] == self.pauseScheduling:
+			self.pauseTheDamnScheduling()
+		if self.currentCommand[146] == self.resumeScheduling:
+			self.resumeTheDamnScheduling()
 		self.clearCurrentCommand()
 		return
 
@@ -173,6 +183,10 @@ class schedulingService(PUSService):
 			self.processSchedReport()
 		if self.currentCommand[146] == self.schedCommandCompleted:		# Event reports on completed command should be going here.
 			self.updateScheduleWithCommandStatus()
+		if self.currentCommand[146] == self.pauseScheduling:
+			self.pauseTheDamnScheduling()
+		if self.currentCommand[146] == self.resumeScheduling:
+			self.resumeTheDamnScheduling()
 		self.clearCurrentCommand()
 		return
 
@@ -436,7 +450,7 @@ class schedulingService(PUSService):
 				self.hSchedFile.seek(lCount)
 				self.hSchedFile.write(items1[0] + "\t\t" + items1[1] + "\t\t" + items1[2] + "\t\t" +
 									  items1[3] + "\t\t" + items1[4] + "\t\t" + items1[5] + "\t\t\t" + items1[6] +
-									  "\t\t\t\t" +  items[7] + "\n")
+									  "\t\t\t\t" +  items1[7] + "\n")
 			lCount += 1
 		return
 
@@ -619,8 +633,55 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def updateScheduleWithCommandStatus(self):
-		# An event report was just received indicating that a scheduled command was either completed or failed.
-		pass
+		# A scheduled command report was just received, update the human schedule
+		cID = self.currentCommand[2] << 8
+		cID += self.currentCommand[1]
+		status = self.currentCommand[0]
+		statString = None
+		if status == 0:
+			return
+		if status == 1:
+			statString = "Y"
+		if status == 2:
+			statString = "F"
+		if status == 3:
+			statString = "E"
+
+		pos = 0
+		for line in self.hSchedFile:
+			tempString = line.rstrip()
+			items = tempString.split()
+			# Get rid of the whitespace in each item from this line in the schedule.
+			i = 0
+			items1 = []
+			for item in items:
+				item = item.rstrip()
+				item = item.lstrip()
+				items1[i] = item
+				i += 1
+			if int(items1[3], 16) == int(cID):
+				self.hSchedFile.seek(pos)
+				items1[6] = statString
+				self.hSchedFile.write(items1[0] + "\t\t" + items1[1] + "\t\t" + items1[2] + "\t\t" +
+									  items1[3] + "\t\t" + items1[4] + "\t\t" + items1[5] + "\t\t\t" + items1[6] +
+									  "\t\t\t\t" +  items1[7] + "\n")
+			pos += 1
+		# remove the command from the computer schedule.
+		pos = 0
+		check = 0
+		for i in range(1, self.numCommands * 16 + 1, 16):
+			self.cSchedFile.seek(i + 7)
+			line = self.cSchedFile.readline()
+			tempString = line.rstrip()
+			check = int(tempString, 16) << 8
+			self.cSchedFile.seek(i + 8)
+			line = self.cSchedFile.readline()
+			tempString = line.rstrip()
+			check += int(tempString, 16)
+			if check == cID:
+				self.cSchedFile.seek(i + 9)
+				self.cSchedFile.write(str(status) + "\n")
+		return
 
 	@staticmethod
 	def waitForTCVerification(self, timeOut, operation):
@@ -648,6 +709,20 @@ class schedulingService(PUSService):
 			self.tcExecuteVerification = 0
 			self.tcLock.release()
 			return 1
+
+	@staticmethod
+	def pauseTheDamnScheduling(self):
+		self.currentCommand[146] = self.pauseScheduling
+		self.sendCurrentCommandToFifo(self.fifotoGPR)
+		self.waitForTCVerification(5000, self.schedReportRequest)
+		return
+
+	@staticmethod
+	def resumeTheDamnScheduling(self):
+		self.currentCommand[146] = self.resumeScheduling
+		self.sendCurrentCommandToFifo(self.fifotoGPR)
+		self.waitForTCVerification(5000, self.schedReportRequest)
+		return
 
 	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock,
 							errorLock, day, hour, minute, second):
