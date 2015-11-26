@@ -20,19 +20,21 @@ NOTES:				For the sake of human readability and computer readability, we are goi
 
 					Human Format:
 
-					TIME			APID		COMMAND		SEV		PARAM		COMPLETED		COMMENT
-					DD/HH/MM/SS		0xFF		0xFF		0|1|2	0xFF		Y|N|E|F			payload stuff
-																			(E = erased, F = failed)
+					TIME			APID		COMMAND		CID			SEV		PARAM				COMPLETED		COMMENT
+					DD/HH/MM/SS		0xFF		0xFF		0x0000		0|1|2	0xFFFFFFFFFFFF		N|Y|F|E			payload stuff
+																							(E = erased, F = failed)
     				APID: Software ID for the process/SSM on the OBC that you are sending this command for.
 
     				COMMAND: Unique identifier for the command being sent (to be added in the future)
 
+    				CID: Unique ID for this instance of the schedule, should be unique within the schedule. (2B)
+
     				SEV: Severity for the command being sent, 0 = N/A, 1 = High severity -> FDIR
     					2 = Low severity -> OBC Packet Router.
 
-    				PARAM: Anything you want that might pertain to the command (1B)
+    				PARAM: Anything you want that might pertain to the command (6B)
 
-    				COMMENT: Any string you desire if it's useful to you.
+    				COMMENT: Any string you desire if it's useful to you
 
     				The other shall be used by the ground scheduling service.
 
@@ -44,6 +46,8 @@ NOTES:				For the sake of human readability and computer readability, we are goi
     				APID
     				COMMAND
     				SEVERITY
+    				CID
+    				STATUS
     				PARAM
 
     				For command files: These shall be added in bulk to both the human schedule and computer schedule
@@ -68,7 +72,15 @@ DEVELOPMENT HISTORY:
 
 11/23/2015			Adding some code for clearTheSchedule()
 
-11/24/2025			Finishing up writing the initial draft for this code today.
+11/24/2025			Added some code for processSchedReport()
+
+11/25/2015			Trying to finish up this service today.
+					I realized that it's going to make life much easier in the future if we incorporate
+					unique IDs for each command which is stored in the ground schedule and OBSW shedule.
+					We should be able to track the progress of specific commands much more easily this way.
+
+					Adding STATUS, and CID to each command. Each command is now 16B, the max number of commands
+					in the schedule is now 511.
 
 """
 
@@ -79,9 +91,10 @@ from PUSService import *
 class schedulingService(PUSService):
 	"""
 	This class is meant to represent the PUS KService which manages scheduling
-	as well as the miscelleaneous commands that can be made by the user
+	as well as the miscellaneous commands that can be made by the user
 	which did not fall under any of the other standard PUS services.
 	"""
+	maxCommands = 511
 	numCommands = 0
 	localSequence = 0
 	localFlags = -1
@@ -146,6 +159,24 @@ class schedulingService(PUSService):
 		return
 
 	@staticmethod
+	def execCommandsExceptClear(self):
+		"""
+		@purpose:   After a command has been received in the FIFO, this function parses through it
+					and performs different actions based on what is received.
+					DOES NOT EXECUTE THE CLEAR COMMAND
+		"""
+		if self.currentCommand[146] == self.addSchedule:
+			self.addToSchedule()
+		if self.currentCommand[146] == self.schedReportRequest:
+			self.requestSchedReport()
+		if self.currentCommand[146] == self.schedReport:
+			self.processSchedReport()
+		if self.currentCommand[146] == self.schedCommandCompleted:		# Event reports on completed command should be going here.
+			self.updateScheduleWithCommandStatus()
+		self.clearCurrentCommand()
+		return
+
+	@staticmethod
 	def addToSchedule(self):
 		"""
 		@purpose: 	This method is used
@@ -163,9 +194,9 @@ class schedulingService(PUSService):
 		self.cSchedFile = open(schedPath, "wb+")
 
 		numNewCommands = self.currentCommand[145]
-		if(self.numCommands + numNewCommands) > 1023:
-			self.printToCLI("REQUESTED SCHEDULE ADDITION WOULD OVERFLOW SCHEDULE (>1023)\n")
-			self.logError("REQUESTED SCHEDULE ADDITION WOULD OVERFLOW SCHEDULE (>1023)")
+		if(self.numCommands + numNewCommands) > self.maxCommands:
+			self.printToCLI("REQUESTED SCHEDULE ADDITION WOULD OVERFLOW SCHEDULE (>%s)\n" %str(self.maxCommands))
+			self.logError("REQUESTED SCHEDULE ADDITION WOULD OVERFLOW SCHEDULE (>%s)" %str(self.maxCommands))
 			return
 
 		newCommandArray = []
@@ -184,7 +215,7 @@ class schedulingService(PUSService):
 				items1[i] = item
 				i += 1
 			# Check to make sure the command is one that is yet to be completed (completed = "N")
-			if items1[5] == "N":
+			if items1[6] == "N":
 				# Get the time from the command
 				time = items1[0]
 				times = time.split("/")
@@ -195,30 +226,40 @@ class schedulingService(PUSService):
 				# Get the remainder of the command attributes
 				commandAPID = int(items1[1], 16)
 				commandID	= int(items1[2], 16)
-				commandSeverity = int(items1[3])
-				commandParam = int(items1[4], 16)
+				cID 		= int(items1[3], 16)
+				commandSeverity = int(items1[4])
+				commandParam = long(items1[5], 16)
+				commandStatus = 0
 				# Add the command to the computer schedule
-				self.addCommandToSchedule(commandTime, commandAPID, commandID, commandSeverity, commandParam)
+				self.addCommandToSchedule(commandTime, commandAPID, commandID, commandSeverity, cID, commandStatus, commandParam)
 				# Put the command in an array for sending to the OBC.
 				newCommandArray[(numNewCommands * 2) - (i * 2)] = commandTime
-				newCommandArray[(numNewCommands * 2) - (i * 2 + 1)] = (commandAPID << 24) + (commandID << 16) + (commandSeverity << 8) + commandParam
+				newCommandArray[(numNewCommands * 2) - (i * 2 + 1)] = (commandAPID << 24) + (commandID << 16) + (commandSeverity << 8) + ((cID & 0xFF00) >> 8)
+				newCommandArray[(numNewCommands * 2) - (i * 2 + 2)] = ((cID & 0x00FF) << 24) + (commandStatus << 16) + int((commandParam & 0xFFFF00000000) >> 32)
+				newCommandArray[(numNewCommands * 2) - (i * 2 + 3)] = int(commandParam & 0x0000FFFFFFFF)
 		#Send the commands to the OBC, one packet @ a time.
 		self.sendCommandsToOBC(numNewCommands, newCommandArray)
 		return
 
 	@staticmethod
-	def addCommandToSchedule(self, time, apid, id, severity, param):
+	def addCommandToSchedule(self, time, apid, id, severity, cID, status, param):
 		"""
 		@purpose: 	This method is used to write a single command to the computer schedule with the given parameters.
 		@param:		time: time for the command
 		@param:		apid: Process ID for which the command is meant for.
 		@param: 	severity: See file header for details.
+		@param:		cID: unique ID for this instance in the schedule.
+		@param: 	status: Indicates progress on this command.
 		@param:		param: Anything you want, can be utilized on the OBC if necessary.
 		"""
-		byte2 = (apid << 24) & (id << 16) & (severity << 8) & param
+		int2 = (apid << 24) & (id << 16) & (severity << 8) & ((cID & 0xFF00) >> 8)
+		int3 = ((ciD & 0x00FF) << 24) & (status << 16) & int((param & 0xFFFF00000000) >> 32)
+		int4 = int(param & 0x0000FFFFFFFF)
 		self.cSchedFile.seek(0, 2)	# Go to the end of the file.
 		self.cSchedFile.write(str(time) + "\n")
-		self.cSchedFile.write(str(byte2) + "\n")
+		self.cSchedFile.write(str(int2) + "\n")
+		self.cSchedFile.write(str(int3) + "\n")
+		self.cSchedFile.write(str(int4) + "\n")
 		self.numCommands += 1
 		return
 
@@ -233,20 +274,22 @@ class schedulingService(PUSService):
 		@Note: The maximum number of commands that will fit into a single PUS packet is 16.
 		"""
 		leftOver = 0
-		if numNewCommands > 16 :
-			numPackets = numNewCommands / 16
-			if numNewCommands % 16:
-				leftOver = numNewCommands % 16
+		if numNewCommands > 8 :
+			numPackets = numNewCommands / 8
+			if numNewCommands % 8:
+				leftOver = numNewCommands % 8
 
-			for i in range(0, numPackets - 1):
+			for i in range(0, numPackets):
 				self.printToCLI("SENDING COMMAND PACKET %s OF %s\n" %str(i + 1) %str(numPackets))
 				self.clearCurrentCommand()
 				self.currentCommand[146] = self.addSchedule
 				self.currentCommand[145] = numPackets - i
-				self.currentCommand[136] = 16
-				for j in range(127, -1, -8):
-					tempTime = commandArray[(numNewCommands * 2) - (i * 32) - ((j + 1) / 8)]
-					tempInt2 = commandArray[(numNewCommands * 2) - (i * 32) - ((j + 1) / 8) - 1]
+				self.currentCommand[136] = 8
+				for j in range(127, -1, -16):
+					tempTime = commandArray[(numNewCommands * 4) - (i * 16) - ((j + 1) / 16)]
+					tempInt2 = commandArray[(numNewCommands * 4) - (i * 16) - ((j + 1) / 16) - 1]
+					tempInt3 = commandArray[(numNewCommands * 4) - (i * 16) - ((j + 1) / 16) - 2]
+					tempInt4 = commandArray[(numNewCommands * 4) - (i * 16) - ((j + 1) / 16) - 3]
 					self.currentCommand[j] 		= (tempTime & 0xFF000000) >> 24
 					self.currentCommand[j - 1] 	= (tempTime & 0x00FF0000) >> 16
 					self.currentCommand[j - 2] 	= (tempTime & 0x0000FF00) >> 8
@@ -255,8 +298,17 @@ class schedulingService(PUSService):
 					self.currentCommand[j - 5] 	= (tempInt2 & 0xFF000000) >> 16
 					self.currentCommand[j - 6] 	= (tempInt2 & 0xFF000000) >> 8
 					self.currentCommand[j - 7] 	= tempInt2 & 0xFF000000
+					self.currentCommand[j - 8] 	= (tempInt3 & 0xFF000000) >> 24
+					self.currentCommand[j - 9] 	= (tempInt3 & 0xFF000000) >> 16
+					self.currentCommand[j - 10] 	= (tempInt3 & 0xFF000000) >> 8
+					self.currentCommand[j - 11] 	= tempInt3 & 0xFF000000
+					self.currentCommand[j - 12] 	= (tempInt4 & 0xFF000000) >> 24
+					self.currentCommand[j - 13] 	= (tempInt4 & 0xFF000000) >> 16
+					self.currentCommand[j - 14] 	= (tempInt4 & 0xFF000000) >> 8
+					self.currentCommand[j - 15] 	= tempInt4 & 0xFF000000
 				# Send the command to the GPR to be sent to the OBC
 				self.sendCurrentCommandToFifo(self.fifoToGPR)
+				# Wait for TC verification from the satellite
 				if self.waitForTCVerification(1000, self.addSchedule) < 0:
 					return
 
@@ -266,9 +318,11 @@ class schedulingService(PUSService):
 				self.currentCommand[146] = self.addSchedule
 				self.currentCommand[145] = 1
 				self.currentCommand[136] = leftOver
-				for j in range((leftOver * 8 - 1), -1, -8):
-					tempTime = commandArray[(numNewCommands * 2) - ((j + 1) / 8)]
-					tempInt2 = commandArray[(numNewCommands * 2) - ((j + 1) / 8) - 1]
+				for j in range((leftOver * 16 - 1), -1, -16):
+					tempTime = commandArray[(numNewCommands * 4) - (numPackets * 16) - ((j + 1) / 16)]
+					tempInt2 = commandArray[(numNewCommands * 4) - (numPackets * 16) - ((j + 1) / 16) - 1]
+					tempInt3 = commandArray[(numNewCommands * 4) - (numPackets * 16) - ((j + 1) / 16) - 2]
+					tempInt4 = commandArray[(numNewCommands * 4) - (numPackets * 16) - ((j + 1) / 16) - 3]
 					self.currentCommand[j] 		= (tempTime & 0xFF000000) >> 24
 					self.currentCommand[j - 1] 	= (tempTime & 0x00FF0000) >> 16
 					self.currentCommand[j - 2] 	= (tempTime & 0x0000FF00) >> 8
@@ -277,6 +331,14 @@ class schedulingService(PUSService):
 					self.currentCommand[j - 5] 	= (tempInt2 & 0xFF000000) >> 16
 					self.currentCommand[j - 6] 	= (tempInt2 & 0xFF000000) >> 8
 					self.currentCommand[j - 7] 	= tempInt2 & 0xFF000000
+					self.currentCommand[j - 8] 	= (tempInt3 & 0xFF000000) >> 24
+					self.currentCommand[j - 9] 	= (tempInt3 & 0xFF000000) >> 16
+					self.currentCommand[j - 10] = (tempInt3 & 0xFF000000) >> 8
+					self.currentCommand[j - 11] = tempInt3 & 0xFF000000
+					self.currentCommand[j - 12] = (tempInt4 & 0xFF000000) >> 24
+					self.currentCommand[j - 13] = (tempInt4 & 0xFF000000) >> 16
+					self.currentCommand[j - 14] = (tempInt4 & 0xFF000000) >> 8
+					self.currentCommand[j - 15] = tempInt4 & 0xFF000000
 					# Send the command to the GPR to be sent to the OBC
 				self.sendCurrentCommandToFifo(self.fifoToGPR)
 				if self.waitforTCVerification(1000, self.addSchedule) < 0:
@@ -287,9 +349,11 @@ class schedulingService(PUSService):
 			self.currentCommand[146] = self.addSchedule
 			self.currentCommand[145] = 1
 			self.currentCommand[136] = numNewCommands
-			for j in range((numNewCommands * 8 - 1), -1, -8):
-				tempTime = commandArray[(numNewCommands * 2) - ((j + 1) / 8)]
-				tempInt2 = commandArray[(numNewCommands * 2) - ((j + 1) / 8) - 1]
+			for j in range((numNewCommands * 16 - 1), -1, -16):
+				tempTime = commandArray[(numNewCommands * 2) - ((j + 1) / 16)]
+				tempInt2 = commandArray[(numNewCommands * 2) - ((j + 1) / 16) - 1]
+				tempInt3 = commandArray[(numNewCommands * 2) - ((j + 1) / 16) - 2]
+				tempInt4 = commandArray[(numNewCommands * 2) - ((j + 1) / 16) - 3]
 				self.currentCommand[j] 		= (tempTime & 0xFF000000) >> 24
 				self.currentCommand[j - 1] 	= (tempTime & 0x00FF0000) >> 16
 				self.currentCommand[j - 2] 	= (tempTime & 0x0000FF00) >> 8
@@ -298,6 +362,14 @@ class schedulingService(PUSService):
 				self.currentCommand[j - 5] 	= (tempInt2 & 0xFF000000) >> 16
 				self.currentCommand[j - 6] 	= (tempInt2 & 0xFF000000) >> 8
 				self.currentCommand[j - 7] 	= tempInt2 & 0xFF000000
+				self.currentCommand[j - 8] 	= (tempInt3 & 0xFF000000) >> 24
+				self.currentCommand[j - 9] 	= (tempInt3 & 0xFF000000) >> 16
+				self.currentCommand[j - 10] = (tempInt3 & 0xFF000000) >> 8
+				self.currentCommand[j - 11] = tempInt3 & 0xFF000000
+				self.currentCommand[j - 12] = (tempInt4 & 0xFF000000) >> 24
+				self.currentCommand[j - 13] = (tempInt4 & 0xFF000000) >> 16
+				self.currentCommand[j - 14] = (tempInt4 & 0xFF000000) >> 8
+				self.currentCommand[j - 15] = tempInt4 & 0xFF000000
 				# Send the command to the GPR to be sent to the OBC
 			self.sendCurrentCommandToFifo(self.fifoToGPR)
 			if self.waitforTCVerication(1000, self.addSchedule) < 0:
@@ -315,7 +387,7 @@ class schedulingService(PUSService):
 		# Continue on with regular operation here for a maximum of one minute.
 		while (tempWait.seconds < 59) and (self.currentCommand[146] != self.schedReport):
 			self.receiveCommandFromFifo(self.fifoFromGPR)
-			self.execCommands()
+			self.execCommandsExceptClear()
 
 		if self.currentCommand[146] != self.schedReport:
 			self.printToCLI("CANNOT CLEAR SCHEDULE, SCHEDULE REPORT TOOK TOO LONG TO COME BACK.\n")
@@ -357,13 +429,14 @@ class schedulingService(PUSService):
 				item = item.lstrip()
 				items1[i] = item
 				i += 1
-			completeString = items1[5]
+			completeString = items1[6]
 			# Set all incomplete commands (ones that are set to "N") to "erased" or "E"
 			if completeString == "N":
-				items1[5] = "E"
+				items1[6] = "E"
 				self.hSchedFile.seek(lCount)
 				self.hSchedFile.write(items1[0] + "\t\t" + items1[1] + "\t\t" + items1[2] + "\t\t" +
-									  items1[3] + "\t\t" + items1[4] + "\t\t" + items1[5] + "\t\t\t" + items1[6] + "\n")
+									  items1[3] + "\t\t" + items1[4] + "\t\t" + items1[5] + "\t\t\t" + items1[6] +
+									  "\t\t\t\t" +  items[7] + "\n")
 			lCount += 1
 		return
 
@@ -407,7 +480,7 @@ class schedulingService(PUSService):
 		self.cSchedFile.seek(0)
 		tempString = self.cSchedFile.readline()
 		tempString = tempString.rstrip()
-		self.packetsRequested = int(tempString) / 16
+		self.packetsRequested = int(tempString) / 8
 		if self.processSchedReportH() < 1:
 			return
 		elif self.numIncomingCommands != self.numCommands:
@@ -440,23 +513,26 @@ class schedulingService(PUSService):
 		schedFile = open(newPath, "wb")
 		schedFile.seek(0)
 		schedFile.truncate()
-		schedFile.write("TIME			APID		COMMAND		SEV		PARAM		COMPLETED		COMMENT\n")
-		sub = 0
+		schedFile.write("TIME			APID		COMMAND		CID			SEV		PARAM				COMPLETED		COMMENT\n")
 		pos = 1
-		for i in range(1, numCommands + 1, 2):
-			pos = i - sub
-			sub += 1
+		for i in range(1, numCommands + 1, 4):
 			schedFile.seek(pos)
+			pos += 1
 			day 		=	(commandArray[i] & 0xFF000000) >> 24
 			hour		=	(commandArray[i] & 0x00FF0000) >> 16
-			minute		=	(commandArray[i] & 0x0000FF00) << 8
+			minute		=	(commandArray[i] & 0x0000FF00) >> 8
 			second		=	commandArray[i] & 0x000000FF
 			apid		=	(commandArray[i + 1] & 0xFF000000) >> 24
 			command		=	(commandArray[i + 1] & 0x00FF0000) >> 16
-			severity	=	(commandArray[i + 1] & 0x0000FF00) << 8
-			param		=	commandArray[i + 1] & 0x000000FF
-			schedFile.write(str(day)+ "/" + str(hour) + "/" + str(minute) + "/" + str(second) + "\t\t" + str(apid) +
-							"\t\t" + str(command) + "\t\t" + str(severity) + "\t\t" + str(param) + "\t\t\tSHEDREPORT")
+			severity	=	(commandArray[i + 1] & 0x0000FF00) >> 8
+			cID			=	(commandArray[i + 1] & 0x000000FF) << 8
+			cID		   +=	(commandArray[i + 2] & 0xFF000000) >> 24
+			param		=   long((commandArray[i + 2] & 0x0000FFFF) << 32)
+			param	   += 	long(commandArray[i + 3])
+
+			schedFile.write(str(day)+ "/" + str(hour) + "/" + str(minute) + "/" + str(second) + "\t\t" + str(hex(apid))
+							+ "\t\t" + str(hex(command)) + "\t\t" + str(hex(cID)) + "\t\t" + str(severity) + "\t\t" +
+							str(hex(param)) + "N\t\t\t\tSHEDREPORT")
 		return
 
 	@staticmethod
@@ -537,12 +613,13 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def clearIncomingSatSchedule(self):
-		for i in range(0, 1023):
+		for i in range(0, self.maxCommands):
 			self.incomingSatelliteSchedule[i] = 0
 		return
 
 	@staticmethod
 	def updateScheduleWithCommandStatus(self):
+		# An event report was just received indicating that a scheduled command was either completed or failed.
 		pass
 
 	@staticmethod
