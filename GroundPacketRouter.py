@@ -40,6 +40,8 @@ DEVELOPMENT HISTORY:
 
 11/20/2015			Added in Fifos so that each service can communicate with the FDIR service 
 					independently.
+
+11/26/2015			Added code for packetizeSendTelecommand()
 """
 from HKService import *
 from FDIRService import *
@@ -155,7 +157,10 @@ class groundPacketRouter(Process):
 	schedulingGround		= None
 	# Packet object
 	currentPacket			= Puspacket()
-	lastPacket				= None
+	lastPacket				= currentPacket
+	sendPacket				= Puspacket()
+	lastSendPacket			= sendPacket
+	sendPacketCount			= 0
 
 	@classmethod
 	def run(self):
@@ -353,30 +358,9 @@ class groundPacketRouter(Process):
 		if not currentPacket:
 			return -1
 
-		currentPacket.packetID 			= currentPacket.data[151] << 8
-		currentPacket.packetID 			|= currentPacket.data[150]
-		currentPacket.psc 				= currentPacket.data[149] << 8
-		currentPacket.psc 				|= currentPacket.data[148]
-		# Packet Header
-		currentPacket.version 			= (currentPacket.data[151] & 0xE0) >> 5
-		currentPacket.type1 			= (currentPacket.data[151] & 0x10) >> 4
-		currentPacket.dataFieldHeaderf 	= (currentPacket.data[151] & 0x08) >> 3
-		currentPacket.apid				= currentPacket.data[150]
-		currentPacket.sequenceFlags		= (currentPacket.data[149] & 0xC0) >> 6
-		currentPacket.sequenceCount		= currentPacket.data[148]
-		currentPacket.packetLengthRx	= currentPacket.data[146] + 1
-		# Data Field Header
-		currentPacket.ccsdsFlag			= (currentPacket.data[145] & 0x80) >> 7
-		currentPacket.packetVersion		= (currentPacket.data[145] & 0x70) >> 4
-		currentPacket.ack				= currentPacket.data[145] & 0x0F
-		currentPacket.serviceType		= currentPacket.data[144]
-		currentPacket.serviceSubType	= currentPacket.data[143]
-		currentPacket.sourceID			= currentPacket.data[142]
-		# Received Checksum Value
-		currentPacket.pec1 				= currentPacket.data[1] << 8
-		currentPacket.pec1 				|= currentPacket.data[0]
-		# Check that the packet error control is correct
-		currentPacket.pec0 				= self.fletcher16(2, 150, currentPacket.data)
+		# This parses through the data array and places the appropriate
+		# information in the attributes of this packet.
+		currentPacket.parseDataArray()
 
 		if self.verifyTelemetry(currentPacket) < 0:
 			return -1
@@ -601,28 +585,6 @@ class groundPacketRouter(Process):
 		self.logEventReport(1, self.incomTMSuccess, 0, 0, "Incoming Telemetry Packet Succeeded")
 		return 1
 
-	@staticmethod
-	def fletcher16(self, offset, count, *data):
-		"""
-		@purpose:   This method is to be used to compute a 16-bit checksum in the exact same
-					manner that it is computed on the satellite.
-		@param: 	*data: int array of the data you want to run the checksum on.
-		@param:		offset: Where in the array you would like to start running the checksum on.
-		@param:		count: How many elements (ints) of the array to include in the checksum.
-		@NOTE:		IMPORTANT: even though *data is an int array, each integer is only using
-					the last 8 bits (since this is meant to be used on incoming PUS packets)
-					Hence, you should create a new method if this is not the functionality you desire.
-
-		@return 	(int) The desired checksum is returned (only the lower 16 bits are used)
-		"""
-		sum1 = 0
-		sum2 = 0
-		for i in range(offset, offset + count):
-			num = data[i] & int(0x000000FF)
-			sum1 = (sum1 + num) % 255
-			sum2 = (sum2 + sum1) % 255
-		return (sum2 << 8) | sum1
-
 	@classmethod
 	def stop(self):
 		# Close all the files which were opened
@@ -693,6 +655,98 @@ class groundPacketRouter(Process):
 		return
 
 	@staticmethod
+	def execCommands(self):
+		self.clearCurrentCommand()
+		if self.receiveCommandFromFifo(self.hkToGPRFifo) > 0:
+			pass
+		if self.receiveCommandFromFifo(self.memToGPRFifo) > 0:
+			pass
+		if self.receiveCommandFromFifo(self.fdirToGPRFifo) > 0:
+			pass
+		if self.receiveCommandFromFifo(self.schedToGPRFifo) > 0:
+			pass
+
+	@staticmethod
+	def packetizeSendTelecommand(self, sender, dest, serviceType, serviceSubType, packetSubCounter, numPackets, appDataArray):
+
+		sequenceCount = 1
+		packetTime =  self.absTime.day << 12
+		packetTime += self.absTime.hour << 8
+		packetTime += self.absTime.minute << 4
+		packetTime += self.absTime.second
+
+		if numPackets > 1:
+			sequenceFlags = 0x01
+		else:
+			sequenceFlags = 0x03
+
+		# Put the new packet into a linked list of packets.
+		newSendPacket = Puspacket()
+		if self.sendPacketCount == 0:
+			self.sendPacket = newSendPacket
+			self.sendPacketCount += 1
+		if self.sendPacketCount == 1:
+			self.lastSendPacket = newSendPacket
+			self.sendPacket.nextPacket = self.lastSendPacket
+			self.lastSendPacket.prevPacket = self.sendPacket
+			self.sendPacketCount += 1
+		elif self.sendPacketCount > 1:
+			self.lastSendPacket.nextPacket = newSendPacket
+			newSendPacket.prevPacket = self.lastSendPacket
+			self.lastSendPacket = newSendPacket
+			self.sendPacketCount += 1
+		# Get the application data for the new packet
+		for i in range(0, self.dataLength):
+			newSendPacket.appData[i] = appDataArray[i]
+		# Fill in the attributes for the new packet
+		newSendPacket.version = 0	# Default is 0
+		newSendPacket.type1 = 1		# TC = 1
+		newSendPacket.ccsdsFlag = 1
+		newSendPacket.sender = sender
+		newSendPacket.sequenceFlags = sequenceFlags
+		newSendPacket.sequenceCount = sequenceCount
+		newSendPacket.serviceType = serviceType
+		newSendPacket.serviceSubType = serviceSubType
+		newSendPacket.packetSubCounter = packetSubCounter
+		newSendPacket.dest = dest
+		newSendPacket.day = self.absTime.day
+		newSendPacket.hour = self.absTime.hour
+		newSendPacket.minute = self.absTime.minute
+		newSendPacket.second = self.absTime.second
+		# Format the actual data array for the packet.
+		newSendPacket.formatDataArray()
+
+		if numPackets == 1:
+			return 1
+
+		# numPackets != 1
+		for i in range(0, numPackets):
+			newSendPacket.data[148] = sequenceCount
+			sequenceCount += 1
+			if i > 1:
+				sequenceFlags = 0x00
+			if i == (numPackets - 1):
+				sequenceFlags = 0x02
+			newSendPacket.data[149] = (sequenceFlags & 0x03) << 6
+			for j in range(2, (self.packetLength - 13)):
+				newSendPacket.data[j] = appDataArray[j + i * 128]
+			# Format the packet again.
+			newSendPacket.formatDataArray()
+			# Insert the new packet into the linked list for sending
+			self.lastSendPacket.nextPacket = newSendPacket
+			newSendPacket.prevPacket = self.lastSendPacket
+			self.lastSendPacket = newSendPacket
+			self.sendPacketCount += 1
+			# Create a new pus packet object to work with
+			newSendPacket = Puspacket()
+		return
+
+	@staticmethod
+	def sendPusPacketTC(self):
+		# To be implemented later.
+		pass
+
+	@staticmethod
 	def logError(self, errorString):
 		self.errorLock.acquire()
 		self.errorLog.write("******************ERROR START****************\n")
@@ -712,6 +766,28 @@ class groundPacketRouter(Process):
 		for i in range(0, (self.dataLength + 10)):
 			self.currentCommand[i] = 0
 		return
+
+	@staticmethod
+	def receiveCommandFromFifo(self, fifo):
+		"""
+		@purpose:   This method takes a command from the the fifo "fifo" which should have a
+		length of 147 bytes & places it into the array self.currentCommand[].
+		@Note: We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
+		"""
+		self.clearCurrentCommand()
+		if os.path.getsize(fifo) > 152:
+			i = 0
+			if fifo.readline() == "START\n":
+				# Start reading in the command.
+				newString = fifo.readline()
+				newString = newString.rstrip()
+				while (newString != "STOP") and (i < (self.dataLength + 11)):
+					self.currentCommand[i] = int(newString)
+					newString = fifo.readline()
+					newString = newString.rstrip()
+					i += 1
+				return 1
+		return -1
 
 	def __init__(self):
 		"""

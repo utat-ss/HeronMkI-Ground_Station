@@ -292,13 +292,13 @@ class PUSService(Process):
 		"""
 		if os.path.getsize(fifo) > 152:
 			i = 0
-			if self.fifoFromGPR.readline() == "START\n":
+			if fifo.readline() == "START\n":
 				# Start reading in the command.
 				newString = fifo.readline()
 				newString = newString.rstrip()
 				while (newString != "STOP") and (i < (self.dataLength + 11)):
 					self.currentCommand[i] = int(newString)
-					newString = self.fifoFromGPR.readline()
+					newString = fifo.readline()
 					newString = newString.rstrip()
 					i += 1
 		return
