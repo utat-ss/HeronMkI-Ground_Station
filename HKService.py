@@ -287,7 +287,7 @@ class hkService(PUSService):
 
 			# Send a PUS Packet to the satellite setting the hk def to the alternate one
 			self.clearCurrentCommand()
-			self.currentCommand[146] = self.clearHKDefinition
+			self.currentCommand[146] = self.newHKDefinition
 			for i in range(0, self.dataLength):
 				self.currentCommand[i] = self.hkDefinition1[i]
 			self.sendCurrentCommandToFifo(self.fifotoFDIR)

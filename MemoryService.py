@@ -75,17 +75,17 @@ class MemoryService(PUSService):
 	}
 
 	@classmethod
-	def run(self):
+	def run(cls):
 		"""
 		@purpose:   Used to house the main program for the memory management service.
 		@Note:		Since this class is a subclass of Process, when self.start() is executed on an
 					instance of this class, a process will be created with the contents of run() as the
 					main program.
 		"""
-		self.initialize(self)
+		cls.initialize(cls)
 		while 1:
-			self.receiveCommandFromFifo(self.fifoFromGPR)		# If command in FIFO, places it in self.currentCommand[]
-			self.execCommands(self)								# Deals with commands from GPR
+			cls.receiveCommandFromFifo(cls.fifoFromGPR)		# If command in FIFO, places it in self.currentCommand[]
+			cls.execCommands(cls)								# Deals with commands from GPR
 		return				# This should never be reached.
 
 	@staticmethod

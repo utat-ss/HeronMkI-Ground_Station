@@ -42,6 +42,8 @@ DEVELOPMENT HISTORY:
 					independently.
 
 11/26/2015			Added code for packetizeSendTelecommand()
+
+11/27/2015			Added the code for execCommands(), and started workin on the CLI.
 """
 from HKService import *
 from FDIRService import *
@@ -161,23 +163,38 @@ class groundPacketRouter(Process):
 	sendPacket				= Puspacket()
 	lastSendPacket			= sendPacket
 	sendPacketCount			= 0
+	# Counting Attributes for the different Telecommand packets that can be sent
+	clearHKCount			= 0
+	newHKCount				= 0
+	enableParamCount		= 0
+	disableParamCount		= 0
+	requestDefReportCount	= 0
+	memoryLoadCount			= 0
+	DumpRequestCount		= 0
+	checkMemCount			= 0
+	addScheduleCount		= 0
+	clearScheduleCount		= 0
+	reportRequestCount		= 0
+	pauseScheduleCount		= 0
+	resumeScheduleCount		= 0
 
 	@classmethod
-	def run(self):
+	def run(cls):
 		"""
 		@purpose: Represents the main program for the ground packet router and Command-Line Interface.
 		"""
-		self.initialize(self)
+		cls.initialize(cls)
 
 		while 1:
 			# Check the transceiver for an incoming packet THIS NEEDS TO PUT INCOMING TELEMETRY INTO PACKET OBJECTS
-			if self.decodeTelemetry(self, self.currentPacket) < 0:
+			if cls.decodeTelemetry(cls, cls.currentPacket) < 0:
 				# Send an error message to FDIRGround
 				pass
-			# Check FIFOs for a required action
+			cls.execCommands(cls)
 			# Check the CLI for required action
-			self.updateServiceTime(self)
-			# Make sure all the subsidiary services are still running
+			cls.updateServiceTime(cls)
+			# Make sure all the subsidiary services are still running, restart them if necessary.
+			# Check if the satellite is in reach, then send commands if it is.
 
 	@staticmethod
 	def initialize(self):
@@ -284,6 +301,11 @@ class groundPacketRouter(Process):
 		self.FDIRPID = self.FDIRGround.pid
 		self.schedPID = self.schedulingGround.pid
 		return
+
+	@staticmethod
+	def checkCLI(self):
+		# Checks the CLI for any commands which this process can act upon.
+		
 
 	@staticmethod
 	def updateServiceTime(self):
@@ -658,13 +680,64 @@ class groundPacketRouter(Process):
 	def execCommands(self):
 		self.clearCurrentCommand()
 		if self.receiveCommandFromFifo(self.hkToGPRFifo) > 0:
-			pass
+			if self.currentCommand[146] == self.clearHKDefinition:
+				self.clearHKCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.clearHKDefinition,
+											  self.clearHKCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.newHKDefinition:
+				self.newHKCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.newHKDefinition,
+											  self.newHKCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.enableParamReport:
+				self.enableParamCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.enableParamReport,
+											  self.enableParamCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.disableParamReport:
+				self.disableParamCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.disableParamReport,
+											  self.disableParamCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.reportHKDefinitions:
+				self.requestDefReportCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.reportHKDefinitions,
+											  self.requestDefReportCount, 1, self.currentCommand)
 		if self.receiveCommandFromFifo(self.memToGPRFifo) > 0:
-			pass
+			if self.currentCommand[146] == self.memoryLoadABS:
+				self.memoryLoadCount += 1
+				self.packetizeSendTelecommand(self.MemGroundID, self.MemoryTaskID, self.memService, self.memoryLoadABS,
+											  self.memoryLoadCount, self.currentCommand[145], self.currentCommand)
+			if self.currentCommand[146] == self.dumpRequestABS:
+				self.dumpRequestCount += 1
+				self.packetizeSendTelecommand(self.MemGroundID, self.MemoryTaskID, self.memService, self.dumpRequestABS,
+											  self.dumpRequestCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.checkMemRequest:
+				self.checkMemCount += 1
+				self.packetizeSendTelecommand(self.MemGroundId, self.MemoryTaskID, self.memService, self.checkMemRequest,
+											  self.checkMemCount, 1, self.currentCommand)
 		if self.receiveCommandFromFifo(self.fdirToGPRFifo) > 0:
+			# Deal with incoming commands from the FDIR task
 			pass
 		if self.receiveCommandFromFifo(self.schedToGPRFifo) > 0:
-			pass
+			if self.currentCommand[146] == self.addSchedule:
+				self.addScheduleCount += 1
+				self.packetizeSendTelecommand(self.SchedGroundId, self.SchedulingTaskID, self.kService, self.addSchedule,
+											  self.addScheduleCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.clearSchedule:
+				self.clearScheduleCount += 1
+				self.packetizeSendTelecommand(self.SchedGroundId, self.SchedulingTaskID, self.kService, self.clearSchedule,
+											  self.clearScheduleCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.schedReportRequest:
+				self.reportRequestCount += 1
+				self.packetizeSendTelecommand(self.SchedGroundId, self.SchedulingTaskID, self.kService, self.schedReportRequest,
+											  self.reportRequestCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.pauseScheduling:
+				self.pauseScheduleCount += 1
+				self.packetizeSendTelecommand(self.SchedGroundId, self.SchedulingTaskID, self.kService, self.pauseScheduling,
+											  self.pauseScheduleCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.resumeScheduling:
+				self.resumeScheduleCount += 1
+				self.packetizeSendTelecommand(self.SchedGroundId, self.SchedulingTaskID, self.kService, self.resumeScheduling,
+											  self.resumeScheduleCount, 1, self.currentCommand)
+		return
 
 	@staticmethod
 	def packetizeSendTelecommand(self, sender, dest, serviceType, serviceSubType, packetSubCounter, numPackets, appDataArray):

@@ -41,7 +41,7 @@ class FDIRService(PUSService):
 	FDIRtoschedFifo		= None
 
 	@classmethod
-	def run(self):
+	def run(cla):
 		"""
 		@purpose:   Used to house the main program for the fdir service.
 		@Note:		Since this class is a subclass of Process, when self.start() is executed on an

@@ -21,8 +21,8 @@ NOTES:				For the sake of human readability and computer readability, we are goi
 					Human Format:
 
 					TIME			APID		COMMAND		CID			SEV		PARAM				COMPLETED		COMMENT
-					DD/HH/MM/SS		0xFF		0xFF		0x0000		0|1|2	0xFFFFFFFFFFFF		N|Y|F|E			payload stuff
-																							(E = erased, F = failed)
+					DD/HH/MM/SS		0xFF		0xFF		0x0000		0|1|2	0xFFFFFFFFFFFF		N|Y|F|E|W		payload stuff
+																							(E = erased, F = failed, W = waiting)
     				APID: Software ID for the process/SSM on the OBC that you are sending this command for.
 
     				COMMAND: Unique identifier for the command being sent (to be added in the future)
@@ -85,6 +85,9 @@ DEVELOPMENT HISTORY:
 11/26/2015
 					Alright, as far as I can tell, the scheduling service code is complete.
 
+11/27/2015			I'm adding a new state for the commands in the human schedule - "W" - which stands for "waiting",
+					meaning we've sent the command to the satellite and are waiting on the completion.
+
 """
 
 import os
@@ -119,7 +122,7 @@ class schedulingService(PUSService):
 	}
 
 	@classmethod
-	def run(self):
+	def run(cls):
 		"""
 		@purpose:   Used to house the main program for the scheduling service.
 		@Note:		Since this class is a subclass of Process, when self.start() is executed on an
@@ -128,11 +131,11 @@ class schedulingService(PUSService):
 		@Note:		The scheduling service shall ask for a schedule report from the satellite in order to update
 					the schedule roughly once every minute.
 		"""
-		self.initialize(self)
+		cls.initialize(cls)
 		while 1:
-			self.receiveCommandFromFifo(self.fifoFromGPR)
-			self.execCommands(self)
-			self.updateScheduleAutomatically(self)
+			cls.receiveCommandFromFifo(cls.fifoFromGPR)
+			cls.execCommands(cls)
+			cls.updateScheduleAutomatically(cls)
 		return
 
 	@staticmethod
@@ -159,7 +162,7 @@ class schedulingService(PUSService):
 			self.requestSchedReport()
 		if self.currentCommand[146] == self.schedReport:
 			self.processSchedReport()
-		if self.currentCommand[146] == self.schedCommandCompleted:		# Event reports on completed command should be going here.
+		if self.currentCommand[146] == self.updatingSchedule:		# Event reports on completed command should be going here.
 			self.updateScheduleWithCommandStatus()
 		if self.currentCommand[146] == self.pauseScheduling:
 			self.pauseTheDamnScheduling()
@@ -251,6 +254,9 @@ class schedulingService(PUSService):
 				newCommandArray[(numNewCommands * 2) - (i * 2 + 1)] = (commandAPID << 24) + (commandID << 16) + (commandSeverity << 8) + ((cID & 0xFF00) >> 8)
 				newCommandArray[(numNewCommands * 2) - (i * 2 + 2)] = ((cID & 0x00FF) << 24) + (commandStatus << 16) + int((commandParam & 0xFFFF00000000) >> 32)
 				newCommandArray[(numNewCommands * 2) - (i * 2 + 3)] = int(commandParam & 0x0000FFFFFFFF)
+				# Set the item to "waiting" so that we don't keep sending it to the satellite.
+				items1[6] = "W"
+
 		#Send the commands to the OBC, one packet @ a time.
 		self.sendCommandsToOBC(numNewCommands, newCommandArray)
 		return
@@ -309,23 +315,27 @@ class schedulingService(PUSService):
 					self.currentCommand[j - 2] 	= (tempTime & 0x0000FF00) >> 8
 					self.currentCommand[j - 3] 	= tempTime & 0x000000FF
 					self.currentCommand[j - 4] 	= (tempInt2 & 0xFF000000) >> 24
-					self.currentCommand[j - 5] 	= (tempInt2 & 0xFF000000) >> 16
-					self.currentCommand[j - 6] 	= (tempInt2 & 0xFF000000) >> 8
-					self.currentCommand[j - 7] 	= tempInt2 & 0xFF000000
+					self.currentCommand[j - 5] 	= (tempInt2 & 0x00FF0000) >> 16
+					self.currentCommand[j - 6] 	= (tempInt2 & 0x0000FF00) >> 8
+					self.currentCommand[j - 7] 	= tempInt2 & 0x000000FF
 					self.currentCommand[j - 8] 	= (tempInt3 & 0xFF000000) >> 24
-					self.currentCommand[j - 9] 	= (tempInt3 & 0xFF000000) >> 16
-					self.currentCommand[j - 10] 	= (tempInt3 & 0xFF000000) >> 8
-					self.currentCommand[j - 11] 	= tempInt3 & 0xFF000000
+					self.currentCommand[j - 9] 	= (tempInt3 & 0x00FF0000) >> 16
+					self.currentCommand[j - 10] 	= (tempInt3 & 0x0000FF00) >> 8
+					self.currentCommand[j - 11] 	= tempInt3 & 0x000000FF
 					self.currentCommand[j - 12] 	= (tempInt4 & 0xFF000000) >> 24
-					self.currentCommand[j - 13] 	= (tempInt4 & 0xFF000000) >> 16
-					self.currentCommand[j - 14] 	= (tempInt4 & 0xFF000000) >> 8
-					self.currentCommand[j - 15] 	= tempInt4 & 0xFF000000
+					self.currentCommand[j - 13] 	= (tempInt4 & 0x00FF0000) >> 16
+					self.currentCommand[j - 14] 	= (tempInt4 & 0x0000FF00) >> 8
+					self.currentCommand[j - 15] 	= tempInt4 & 0x000000FF
 				# Send the command to the GPR to be sent to the OBC
 				self.sendCurrentCommandToFifo(self.fifoToGPR)
 				# Wait for TC verification from the satellite
 				if self.waitForTCVerification(1000, self.addSchedule) < 0:
+					# Set all the commands which were "waiting" back to "N" == 0.
+					for j in range(127, -1, -16):
+						cID = self.currentCommand[j - 7] << 8
+						cID += self.currentCommand[j - 8]
+						self.updateScheduleWithCommandStatus(cID, 0)
 					return
-
 			if leftOver:
 				self.printToCLI("SENDING COMMAND PACKET %s OF %s\n" %str(numPackets) %str(numPackets))
 				self.clearCurrentCommand()
@@ -632,11 +642,17 @@ class schedulingService(PUSService):
 		return
 
 	@staticmethod
-	def updateScheduleWithCommandStatus(self):
+	def updateScheduleWithCommandStatus(self, newcID=0, newstatus=0):
+		# The CID and status of the command can be provided, or
+		# This method will utilize what is stored in currentCommand
 		# A scheduled command report was just received, update the human schedule
-		cID = self.currentCommand[2] << 8
-		cID += self.currentCommand[1]
-		status = self.currentCommand[0]
+		if not newcID:
+			cID = self.currentCommand[2] << 8
+			cID += self.currentCommand[1]
+			status = self.currentCommand[0]
+		else:
+			cID = newcID
+			status = newstatus
 		statString = None
 		if status == 0:
 			return
@@ -646,6 +662,8 @@ class schedulingService(PUSService):
 			statString = "F"
 		if status == 3:
 			statString = "E"
+		if status == 4:
+			statString = "W"
 
 		pos = 0
 		for line in self.hSchedFile:
