@@ -127,6 +127,7 @@ class PUSService(Process):
 	GroundPacketRouterID	= 0x13
 	FDIRGroundID			= 0x14
 	SchedGroundID			= 0x15
+	cliID					= 0x16
 	# Parameter Names:
 	parameters ={
 		# Sensor Names

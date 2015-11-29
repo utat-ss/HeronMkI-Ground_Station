@@ -44,6 +44,9 @@ DEVELOPMENT HISTORY:
 11/26/2015			Added code for packetizeSendTelecommand()
 
 11/27/2015			Added the code for execCommands(), and started workin on the CLI.
+
+11/28/2015			I decided it makes more sense to have a separate process which shall monitor the command line
+					interface.
 """
 from HKService import *
 from FDIRService import *
@@ -301,11 +304,6 @@ class groundPacketRouter(Process):
 		self.FDIRPID = self.FDIRGround.pid
 		self.schedPID = self.schedulingGround.pid
 		return
-
-	@staticmethod
-	def checkCLI(self):
-		# Checks the CLI for any commands which this process can act upon.
-		
 
 	@staticmethod
 	def updateServiceTime(self):
