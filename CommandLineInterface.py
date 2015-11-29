@@ -25,11 +25,7 @@ DEVELOPMENT HISTORY:
 
 """
 
-import os
-from multiprocessing import *
-from PUSService import *
-
-class CommandLineInterface(Process):
+class CommandLineInterface():
     """
     This class is meant to represent the PUS FDIR Service.
     """
@@ -45,15 +41,17 @@ class CommandLineInterface(Process):
                     instance of this class, a process will be created with the contents of run() as the
                     main program.
         """
-        pass
+        while 1:
+            commandString = raw_input("Enter a command / command file")
+            print("\nYou entered: %s\n" %commandString)
+            if commandString == "kill":
+                return
 
-    def __init__(self):
-        # Inititalize this instance as a PUS service
-        super(CommandLineInterface, self).__init__()
-
+    def __init__(self, path1, path2):
         # FIFOs for communication with the Ground Packet Router
-        self.OBCToCLIFifo 		= open(path3, "rb")
-        self.CLIToOBCFifo 		= open(path4, "rb")
+        self.GPRToCLIFifo 		= open(path1, "rb")
+        self.CLIToFPRFifo 		= open(path2, "wb")
 
 if __name__ == '__main__':
-    pass
+    CLI = CommandLineInterface("/fifos/GPRToCLI.fifo", "fifos/CLIToGPR.fifo")
+    CLI.run()

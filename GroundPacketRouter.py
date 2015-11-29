@@ -55,6 +55,8 @@ from SchedulingService import *
 from PUSPacket import *
 from datetime import *
 from multiprocessing import *
+from sys import executable
+from subprocess import Popen, CREATE_NEW_CONSOLE
 
 class groundPacketRouter(Process):
 	"""
@@ -188,6 +190,12 @@ class groundPacketRouter(Process):
 		"""
 		cls.initialize(cls)
 
+		Popen([executable, "CommandLineInterface.py"], creationflags=CREATE_NEW_CONSOLE)
+		while 1:
+			response = raw_input("Enter something to kill this process")
+			if response:
+				return
+
 		while 1:
 			# Check the transceiver for an incoming packet THIS NEEDS TO PUT INCOMING TELEMETRY INTO PACKET OBJECTS
 			if cls.decodeTelemetry(cls, cls.currentPacket) < 0:
@@ -245,6 +253,11 @@ class groundPacketRouter(Process):
 		os.mkfifo(path4)
 		os.mkfifo(path5)
 		os.mkfifo(path6)
+		# Create the required FIFOs for the CLI
+		os.mkfifo("/fifos/GPRToCLI.fifo")
+		self.GPRToCLIFifo = open("/fifos/GPRToCLI.fifo", "wb")
+		os.mkfifo("/fifos/CLIToGPR.fifo")
+		self.CLIToGPRFifo = open("/fifos/CLIToGPR.fifo", "rb")
 		# Create all the files required for logging
 		self.eventLog = None
 		self.hkLog = None
@@ -606,24 +619,24 @@ class groundPacketRouter(Process):
 		return 1
 
 	@classmethod
-	def stop(self):
+	def stop(cls):
 		# Close all the files which were opened
-		self.hkToGPRFifo.close()
-		self.GPRTohkFifo.close()
-		self.memToGPRFifo.close()
-		self.GPRTomemFifo.close()
-		self.fdirToGPRFifo.close()
-		self.GPRTofdirFifo.close()
+		cls.hkToGPRFifo.close()
+		cls.GPRTohkFifo.close()
+		cls.memToGPRFifo.close()
+		cls.GPRTomemFifo.close()
+		cls.fdirToGPRFifo.close()
+		cls.GPRTofdirFifo.close()
 
 		# Kill all the children
-		if self.hkGroundService.is_alive():
-			self.hkGroundService.terminate()
-		if self.memoryGroundService.is_alive():
-			self.memoryGroundService.terminate()
-		if self.FDIRGround.is_alive():
-			self.FDIRGround.terminate()
-		if self.schedulingGround.as_alive():
-			self.schedulingGround.terminate()
+		if cls.hkGroundService.is_alive():
+			cls.hkGroundService.terminate()
+		if cls.memoryGroundService.is_alive():
+			cls.memoryGroundService.terminate()
+		if cls.FDIRGround.is_alive():
+			cls.FDIRGround.terminate()
+		if cls.schedulingGround.as_alive():
+			cls.schedulingGround.terminate()
 
 		# Delete all the FIFO files that were created
 		os.remove("/fifos/hkToGPR.fifo")
@@ -641,6 +654,8 @@ class groundPacketRouter(Process):
 		os.remove("/fifos/FDIRtohk.fifo")
 		os.remove("/fifos/FDIRtomem.fifo")
 		os.remove("/fifos/FDIRtosched.fifo")
+		os.remove("/fifos/CLIToGPR.fifo")
+		os.remove("/fifos/GPRToCLI.fifo")
 		return
 
 	@staticmethod

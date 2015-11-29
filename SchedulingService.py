@@ -111,7 +111,7 @@ class schedulingService(PUSService):
 	cSchedFile	= None
 	incomingSatelliteSchedule = []
 	numIncomingCommands = 0
-	schedWaitTime = datetime.timedelta(0)
+	schedWaitTime = timedelta(0)
 	schedOperations ={
 		0x01			: "ADD SCHEDULE",
 		0x02			: "CLEAR SCHEDULE",

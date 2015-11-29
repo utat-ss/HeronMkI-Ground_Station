@@ -176,7 +176,7 @@ class PUSService(Process):
 	}
 	invParameters 			= None
 	# Global Variables for Time
-	absTime 				= datetime.timedelta(0)
+	absTime 				= timedelta(0)
 	# Files to be used for logging and housekeeping
 	eventLog 				= None
 	hkLog 					= None
