@@ -627,7 +627,6 @@ class groundPacketRouter(Process):
 		cls.GPRTomemFifo.close()
 		cls.fdirToGPRFifo.close()
 		cls.GPRTofdirFifo.close()
-
 		# Kill all the children
 		if cls.hkGroundService.is_alive():
 			cls.hkGroundService.terminate()

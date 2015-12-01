@@ -404,6 +404,11 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def clearTheSchedule(self):
+		"""
+		@purpose: 	This method will first update the current schedule, then set all commands in the human schedule
+					which are currently set to "N" as "E" meaning -erased-, It will also clear the local computer
+					schedule of any commands and clear the satellite's schedule.
+		"""
 		tempWait = datetime.timedelta(0)
 		# First get a schedule report from the satellite in case some actions were completed very recently.
 		self.requestSchedReport()
@@ -440,6 +445,10 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def eraseCommandsInHumanSchedule(self):
+		"""
+		@purpose: 	This method is a helper for clearTheSchedule() as it performs the actual action of
+		 going through the human schedule and setting the status of each command currently "N" to "E"
+		"""
 		lCount = 0
 		for line in self.hSchedFile:
 			tempString = line.rstrip()
@@ -466,6 +475,11 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def clearTheScheduleH(self):
+		"""
+		@purpose: 	This method sends a command to GPR which we intend to be telecommanded to the satellite.
+					If this command is followed through, the schedule on the satellite shall be cleared.
+		@reeturn:	1 is success, -1 = failure
+		"""
 		self.currentCommand[146] = self.clearSchedule
 		self.sendCurrentCommandToFifo(self.fifotoGPR)
 		if self.waitForTCVerification(5000, self.clearSchedule) < 0:	# Wait max of 5s for the TC verification
@@ -475,6 +489,10 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def requestSchedReport(self):
+		"""
+		@purpose: 	This method sends a command to GPR to be telecommanded to the satellite.
+					If this command is followed through, a schedule report should be downlinked by the satellite.
+		"""
 		self.currentCommand[146] = self.schedReportRequest
 		self.sendCurrentCommandToFifo(self.fifotoGPR)
 		self.waitForTCVerification(5000, self.schedReportRequest)
@@ -482,12 +500,19 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def clearComputerSchedule(self):
+		"""
+		@purpose: 	This method is a helper to createTheSchedule(), and clears the local computer schedule of commands.
+		"""
 		self.cSchedFile.seek(0)
 		self.cSchedFile.truncate()
 		return
 
 	@staticmethod
 	def updateScheduleAutomatically(self):
+		"""
+		@purpose: 	This method will check whether the time since the last schedule update has surpassed 60 seconds,
+					if it has, then we request a schedule report which shall update the schedule if there are any changes.
+		"""
 		if self.schedWaitTime.seconds > 60:
 			self.schedWaitTime = datetime.timedelta(0)
 			self.requestSchedReport()
@@ -499,6 +524,13 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def processSchedReport(self):
+		"""
+		@purpose: 	This method is used when a schedule report is being received / is received from the satellite.
+					The main thing that we want to check is that the number of commands contained on the satellite
+					is equal to the number of commands contained on the ground schedule (+- a couple)
+		@Note:		I keep track of the fact that the schedule report is going to downlinked in PUS-sized pieces.
+
+		"""
 
 		# Figure out approximately how many packets there are going to be.
 		self.cSchedFile.seek(0)
@@ -532,7 +564,11 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def turnCommandArrayIntoSchedReport(self, numCommands, commandArray):
-
+		"""
+		@purpose: 	This helper method takes an array commands formatted in the PUS, the same in the computer schedule
+					and shown in the notes for the file header at the top of this file.
+					It then takes these commands and parses them into what we want as a "human schedule"
+		"""
 		newPath = "schedule/reports/schedReport%s" %str(self.schedReportCount)
 		schedFile = open(newPath, "wb")
 		schedFile.seek(0)
@@ -561,6 +597,12 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def processSchedReportH(self):
+		"""
+		@purpose: 	This method is a helper to processSchedControl(), this method does the actual work of keeping
+					track of sequence control on the incoming packets and letting the main method know when an
+					entire schedule report has been received.
+
+		"""
 		# This array is going to contain all the commands currently being stored on the schedule in the satellite.
 		obcSequenceFlags	= (self.currentCommand[143] & 0xC0) >> 6
 		obcSequenceCount	= self.currentCommand[142]
@@ -637,14 +679,21 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def clearIncomingSatSchedule(self):
+		"""
+		@purpose: 	Clears the list self.incomingSatelliteSchedule[]
+
+		"""
 		for i in range(0, self.maxCommands):
 			self.incomingSatelliteSchedule[i] = 0
 		return
 
 	@staticmethod
 	def updateScheduleWithCommandStatus(self, newcID=0, newstatus=0):
-		# The CID and status of the command can be provided, or
-		# This method will utilize what is stored in currentCommand
+		"""
+		@purpose: 	This method is used when a command completion report (for a scheduled command) is being received.
+		@Note:		The CID and status of the command can be provided or this method will utilize what is stored in
+					self.currentCommand[]
+		"""
 		# A scheduled command report was just received, update the human schedule
 		if not newcID:
 			cID = self.currentCommand[2] << 8
@@ -730,6 +779,10 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def pauseTheDamnScheduling(self):
+		"""
+		@purpose: 	This method sends a command to GPR to be telecommanded to the satellite, the result of this
+					command is that scheduled operations on the satellite are temporarily paused.
+		"""
 		self.currentCommand[146] = self.pauseScheduling
 		self.sendCurrentCommandToFifo(self.fifotoGPR)
 		self.waitForTCVerification(5000, self.schedReportRequest)
@@ -737,6 +790,10 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def resumeTheDamnScheduling(self):
+		"""
+		@purpose: 	This method sends a command to GPR to be telecommanded to the satellite, the result of this
+					command is that scheduled operations on the satellite are resumed. (No effect if already running)
+		"""
 		self.currentCommand[146] = self.resumeScheduling
 		self.sendCurrentCommandToFifo(self.fifotoGPR)
 		self.waitForTCVerification(5000, self.schedReportRequest)
