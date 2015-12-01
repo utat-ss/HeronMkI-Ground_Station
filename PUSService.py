@@ -176,7 +176,7 @@ class PUSService(Process):
 	}
 	invParameters 			= None
 	# Global Variables for Time
-	absTime 				= timedelta(0)
+	absTime 				= datetime(2015, 1, 1, 0, 0, 0)# Set the absolute time to zero. (for now)
 	# Files to be used for logging and housekeeping
 	eventLog 				= None
 	hkLog 					= None
@@ -190,6 +190,14 @@ class PUSService(Process):
 	# TC Verification Attribute used for letting the services know when a TC verification was received.
 	tcAcceptVerification = 0			# 0 = None received, should be cleared by the service.
 	tcExecuteVerification = 0
+	# For synchronization with GPR
+	wait					= 0
+	FDIROutPath				= None
+	FDIRInPath				= None
+	fifotoFDIR				= None
+	fifofromFDIR			= None
+	p1						= None
+	p2						= None
 
 	@classmethod
 	def clearCurrentCommand(self):
@@ -306,7 +314,18 @@ class PUSService(Process):
 					i += 1
 		return
 
-	def __init__(self, path1, path2, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second):
+	@classmethod
+	def createAndOpenFifoToFDIR(cls):
+		os.mkfifo(cls.FDIROutPath)
+		cls.fifotoFDIR = open(cls.FDIROutPath, "wb")
+		return
+
+	@classmethod
+	def openFifoFromFDIR(cls):
+		cls.fifofromFDIR = open(cls.FDIRInPath, "rb")
+		return
+
+	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second):
 		"""
 		@purpose: Initialization method for the PUS service class.
 		@param: path1: path to the file being used as a one-way fifo TO this PUS Service Instance
@@ -314,21 +333,11 @@ class PUSService(Process):
 		@param: day, hour, minute, second: Time to be set & subsequently updated by the Ground Packet Router
 		"""
 		super(PUSService, self).__init__()					# Initialize self as a process
-
-		# FIFOs Required for communication with the Ground Packet Router:
-		self.fifoToGPR				= open(path1, "wb")
-		self.fifoToGPRPath			= path1
-		self.fifoFromGPR			= open(path1, "rb")
-		self.fifoFromGPRPath		= path2
+		print(path1)
+		self.p1 = path1
+		self.p2 = path2
 		# Inverse Parameter dictionary of the one shown above
 		self.invParameters = {v : k for k,v in self.parameters.items()}
-
-		# Global Variables for Time
-		self.absTime 					= datetime.timedelta(0)
-		self.absTime.day				= day
-		self.absTime.day				= hour
-		self.absTime.minute				= minute
-		self.absTime.second				= second
 		# Files to be used for logging and housekeeping
 		self.eventLog = open(eventPath, "a+")						# Open the logs for appending
 		self.hkLog = open(hkPath, "a+")
@@ -342,6 +351,8 @@ class PUSService(Process):
 		# TC Verification Attribute used for letting the services know when a TC verification was received.
 		self.tcAcceptVerification = 0			# 0 = None received, should be cleared by the service.
 		self.tcExecuteVerification = 0
+		self.FDIROutPath = path3
+		self.FDIRInPath = path4
 		return
 
 if __name__ == '__main__':

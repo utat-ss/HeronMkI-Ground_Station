@@ -93,6 +93,7 @@ DEVELOPMENT HISTORY:
 import os
 from multiprocessing import *
 from PUSService import *
+from datetime import *
 
 class schedulingService(PUSService):
 	"""
@@ -121,21 +122,22 @@ class schedulingService(PUSService):
 		0x07			: "UPDATING SCHEDULE"
 	}
 
-	@classmethod
-	def run(cls):
+	@staticmethod
+	def run1(self):
 		"""
 		@purpose:   Used to house the main program for the scheduling service.
 		@Note:		Since this class is a subclass of Process, when self.start() is executed on an
-					instance of this class, a process will be created with the contents of run() as the
+					instance of this class, a process will be created with the contents of run1() as the
 					main program.
 		@Note:		The scheduling service shall ask for a schedule report from the satellite in order to update
 					the schedule roughly once every minute.
 		"""
-		cls.initialize(cls)
+		self.initializePUS(self)
+		self.initialize(self)
 		while 1:
-			cls.receiveCommandFromFifo(cls.fifoFromGPR)
-			cls.execCommands(cls)
-			cls.updateScheduleAutomatically(cls)
+			self.receiveCommandFromFifo(self.fifoFromGPR)
+			self.execCommands(self)
+			self.updateScheduleAutomatically(self)
 		return
 
 	@staticmethod
@@ -421,7 +423,7 @@ class schedulingService(PUSService):
 		if self.currentCommand[146] != self.schedReport:
 			self.printToCLI("CANNOT CLEAR SCHEDULE, SCHEDULE REPORT TOOK TOO LONG TO COME BACK.\n")
 			self.logError("CANNOT CLEAR SCHEDULE, SCHEDULE REPORT TOOK TOO LONG TO COME BACK.")
-			self.execCommands() # Run the command which we might currently have.
+			self.execCommands() # run1 the command which we might currently have.
 			self.clearCurrentCommand()
 			self.currentCommand[146] = self.clearSchedule
 			self.sendCurrentCommandToFifo(self.fifotoFDIR)		# Send the command to the FDIR task.
@@ -504,7 +506,7 @@ class schedulingService(PUSService):
 		@purpose: 	This method is a helper to createTheSchedule(), and clears the local computer schedule of commands.
 		"""
 		self.cSchedFile.seek(0)
-		self.cSchedFile.truncate()
+		self.cSchedFile.trun1cate()
 		return
 
 	@staticmethod
@@ -514,7 +516,7 @@ class schedulingService(PUSService):
 					if it has, then we request a schedule report which shall update the schedule if there are any changes.
 		"""
 		if self.schedWaitTime.seconds > 60:
-			self.schedWaitTime = datetime.timedelta(0)
+			self.schedWaitTime = timedelta(0)
 			self.requestSchedReport()
 			if self.waitForTCVerification(5000, self.updatingSchedule) < 0:
 				return
@@ -572,7 +574,7 @@ class schedulingService(PUSService):
 		newPath = "schedule/reports/schedReport%s" %str(self.schedReportCount)
 		schedFile = open(newPath, "wb")
 		schedFile.seek(0)
-		schedFile.truncate()
+		schedFile.trun1cate()
 		schedFile.write("TIME			APID		COMMAND		CID			SEV		PARAM				COMPLETED		COMMENT\n")
 		pos = 1
 		for i in range(1, numCommands + 1, 4):
@@ -799,15 +801,32 @@ class schedulingService(PUSService):
 		self.waitForTCVerification(5000, self.schedReportRequest)
 		return
 
+	@staticmethod
+	def initializePUS(self):
+		# FIFOs Required for communication with the Ground Packet Router:
+		os.mkfifo(self.p1)
+		self.fifoToGPR				= open(self.p1, "wb")
+		self.fifoToGPRPath			= self.p1
+		self.wait					= 1
+		self.fifoFromGPR			= open(self.p2, "rb")
+		self.fifoFromGPRPath		= self.p2
+		self.createAndOpenFifoToFDIR()
+		self.openFifoFromFDIR()
+		return
+
 	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock,
 							errorLock, day, hour, minute, second):
 		# Initialize this instance as a PUS service
-		super(schedulingService, self).__init__(path1, path2, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock,
+		super(schedulingService, self).__init__(path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock,
 							cliLock, errorLock, day, hour, minute, second)
-
-		# FIFOs for communication with the FDIR service
-		self.fifotoFDIR = open(path3, "wb")
-		self.fifofromFDIR = open(path4, "rb")
+		self.p1 = path1
+		self.p2 = path2
+		pID = os.fork()
+		if pID:
+			self.pID = pID
+			return
+		else:
+			self.run1(self)
 
 if __name__ == '__main__':
 	pass

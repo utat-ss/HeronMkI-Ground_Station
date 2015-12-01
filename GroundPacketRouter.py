@@ -53,10 +53,10 @@ from FDIRService import *
 from MemoryService import *
 from SchedulingService import *
 from PUSPacket import *
-from datetime import *
+from datetime import datetime
 from multiprocessing import *
 from sys import executable
-from subprocess import Popen, CREATE_NEW_CONSOLE
+from subprocess import Popen
 
 class groundPacketRouter(Process):
 	"""
@@ -182,6 +182,7 @@ class groundPacketRouter(Process):
 	reportRequestCount		= 0
 	pauseScheduleCount		= 0
 	resumeScheduleCount		= 0
+	currentPath				= None
 
 	@classmethod
 	def run(cls):
@@ -190,7 +191,7 @@ class groundPacketRouter(Process):
 		"""
 		cls.initialize(cls)
 
-		Popen([executable, "CommandLineInterface.py"], creationflags=CREATE_NEW_CONSOLE)
+		os.system("gnome-terminal --disable-factory -e {python CommandLineInterface.py}")
 		while 1:
 			response = raw_input("Enter something to kill this process")
 			if response:
@@ -215,70 +216,58 @@ class groundPacketRouter(Process):
 					-Initializes mutex locks
 					-Creates subsidiary services for: housekeeping, memory management, failure detection isolation & recovery (FDIR)
 		"""
-		self.absTime = datetime.timedelta(0)	# Set the absolute time to zero. (for now)
+		self.absTime = datetime(2015, 1, 1, 0, 0, 0)# Set the absolute time to zero. (for now)
 		self.oldAbsTime = self.absTime
 		self.currentTime = datetime(2015, 11, 21)
 
-		self.clearCurrentCommand()
+		self.initCurrentCommand(self)
 
 		"""Get the absolute time from the satellite and update ours."""
+		self.currentPath = os.path.dirname(os.path.realpath(__file__))
+		os.chdir(self.currentPath)
+		print("Current Working Directory: %s" %self.currentPath)
 
-		# Create all the required FIFOs for PUS communicattion
-		os.mkfifo("/fifos/hkToGPR.fifo")
-		self.hkToGPRFifo = open("/fifos/hkToGPR.fifo", "rb")
-		os.mkfifo("/fifos/GPRtohk.fifo")
-		self.GPRTohkFifo = open("/fifos/GPRtohk.fifo", "wb")
-		os.mkfifo("/fifos/memToGPR.fifo")
-		self.memToGPRFifo = open("/fifos/memToGPR.fifo", "rb")
-		os.mkfifo("/fifos/GPRtomem.fifo")
-		self.GPRTomemFifo = open("/fifos/GPRtomem.fifo", "wb")
-		os.mkfifo("/fifos/fdirToGPR.fifo")
-		self.fdirToGPRFifo = open("/fifos/fdirToGPR.fifo", "rb")
-		os.mkfifo("/fifos/GPRtofdir.fifo")
-		self.GPRTofdirFifo = open("/fifos/GPRtofdir.fifo", "wb")
-		os.mkfifo("/fifos/GPRTosched.fifo")
-		self.GPRtoschedFifo = open("/fifos/GPRTosched.fifo", "wb")
-		os.mkfifo("/fifos/schedToGPR.fifo")
-		self.schedToGPRFifo = open("/fifos/schedToGPR.fifo", "rb")
+		# Create all the required FIFOs for to send information to the PUS services.
+		os.mkfifo(self.currentPath + "/fifos/GPRtohk.fifo")
+		os.mkfifo(self.currentPath + "/fifos/GPRtomem.fifo")
+		os.mkfifo(self.currentPath + "/fifos/GPRtofdir.fifo")
+		os.mkfifo(self.currentPath + "/fifos/GPRTosched.fifo")
+
 		# Create all the required FIFOs for the FDIR service
-		path1 = "/fifos/hktoFDIR.fifo"
-		path2 = "/fifos/memtoFDIR.fifo"
-		path3 = "/fifos/schedtoFDIR.fifo"
-		path4 = "/fifos/FDIRtohk.fifo"
-		path5 = "/fifos/FDIRtomem.fifo"
-		path6 = "/fifos/FDIRtosched.fifo"
-		os.mkfifo(path1)
-		os.mkfifo(path2)
-		os.mkfifo(path3)
-		os.mkfifo(path4)
-		os.mkfifo(path5)
-		os.mkfifo(path6)
+		path1 = self.currentPath + "/fifos/hktoFDIR.fifo"
+		path2 = self.currentPath + "/fifos/memtoFDIR.fifo"
+		path3 = self.currentPath + "/fifos/schedtoFDIR.fifo"
+		path4 = self.currentPath + "/fifos/FDIRtohk.fifo"
+		path5 = self.currentPath + "/fifos/FDIRtomem.fifo"
+		path6 = self.currentPath + "/fifos/FDIRtosched.fifo"
 		# Create the required FIFOs for the CLI
-		os.mkfifo("/fifos/GPRToCLI.fifo")
-		self.GPRToCLIFifo = open("/fifos/GPRToCLI.fifo", "wb")
-		os.mkfifo("/fifos/CLIToGPR.fifo")
-		self.CLIToGPRFifo = open("/fifos/CLIToGPR.fifo", "rb")
+		os.mkfifo(self.currentPath + "/fifos/GPRToCLI.fifo")
+		#self.GPRToCLIFifo = open(self.currentPath + "/fifos/GPRToCLI.fifo", "w")
+		os.mkfifo(self.currentPath + "/fifos/CLIToGPR.fifo")
+		#self.CLIToGPRFifo = open(self.currentPath + "/fifos/CLIToGPR.fifo", "r")
 		# Create all the files required for logging
 		self.eventLog = None
 		self.hkLog = None
 		self.hkDefLog = None
 		self.errorLog = None
-		eventPath = "/events/eventLog%s%s.csv" %self.currentTime.month %self.currentTime.day
+		print(self.currentTime.month)
+		print(self.currentTime.day)
+		eventPath = self.currentPath + "/events/eventLog%s.csv" %(str(self.currentTime.month) + str(self.currentTime.day))
 		if os.path.exists(eventPath):
 			self.eventLog = open(eventPath, "rb+")
 		else:
 			self.eventLog = open(eventPath, "wb")
-		hkPath = "/housekeeping/logs/hkLog%s%s.csv" %self.currentTime.month %self.currentTime.day
+		hkPath = self.currentPath + "/housekeeping/logs/hkLog%s.csv" %(str(self.currentTime.month) + str(self.currentTime.day))
 		if os.path.exists(hkPath):
 			self.hkLog = open(hkPath, "rb+")
 		else:
 			self.hkLog = open(hkPath, "wb")
-		hkDefPath = "/housekeeping/logs/hkDefLog%s%s.txt" %self.currentTime.month %self.currentTime.day
+		hkDefPath = self.currentPath + "/housekeeping/logs/hkDefLog%s.txt" %(str(self.currentTime.month) + str(self.currentTime.day))
 		if os.path.exists(hkDefPath):
 			self.hkDefLog = open(hkDefPath, "rb+")
 		else:
 			self.hkDefLog  = open(hkDefPath, "wb")
-		errorPath = "/ground_errors/errorLog%s%s.txt" %self.currentTime.month %self.currentTime.day
+		errorPath = self.currentPath + "/ground_errors/errorLog%s.txt" %(str(self.currentTime.month) + str(self.currentTime.day))
 		if os.path.exists(errorPath):
 			self.errorLog = open(errorPath, "rb+")
 		else:
@@ -295,22 +284,48 @@ class groundPacketRouter(Process):
 		self.fdirTCLock		= Lock()
 
 		# Create all the required PUS Services
-		self.hkGroundService 		= hkService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", path1, path4,
+		self.hkGroundService 		= hkService(self.currentPath + "/fifos/hkToGPR.fifo", self.currentPath + "/fifos/GPRtohk.fifo", path1, path4,
 											self.hkTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
 											self.cliLock, self.errorLock, self.absTime.day, self.absTime.hour,
 											self.absTime.minute, self.absTime.second, hkDefPath)
-		self.memoryGroundService 	= MemoryService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", path2, path5,
+		self.memoryGroundService 	= MemoryService(self.currentPath + "/fifos/memToGPR.fifo", self.currentPath + "/fifos/GPRtomem.fifo", path2, path5,
 											self.memTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
 											self.cliLock, self.errorLock, self.absTime.day, self.absTime.hour,
 											self.absTime.minute, self.absTime.second)
-		self.schedulingGround		= schedulingService("/fifos/schedToGPR.fifo", "/fifos/GPRtosched.fifo", path3, path6,
+		self.schedulingGround		= schedulingService(self.currentPath + "/fifos/schedToGPR.fifo", self.currentPath + "/fifos/GPRtosched.fifo", path3, path6,
 											self.schedTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
 											self.cliLock, self.errorLock, self.absTime.day, self.absTime.hour,
 											self.absTime.minute, self.absTime.second)
-		self.FDIRGround 			= FDIRService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", path1, path2, path3,
+		self.FDIRGround 			= FDIRService(self.currentPath + "/fifos/fdirToGPR.fifo", self.currentPath + "/fifos/GPRtofdir.fifo", path1, path2, path3,
 											path4, path5, path6, self.fdirTCLock, eventPath, hkPath, errorPath,
 											self.eventLock, self.hkLock, self.cliLock, self.errorLock, self.absTime.day,
 											self.absTime.minute, self.absTime.minute, self.absTime.second)
+
+		print("HK PID: %s" %str(self.hkGroundService.pID))
+		print("mem PID: %s" %str(self.memoryGroundService.pID))
+		print("Sched PID: %s" %str(self.schedulingGround.pID))
+		print("FDIR PID: %s" %str(self.FDIRGround.pID))
+
+		# Open all the FIFOs TO the subsidiary services for writing
+		self.GPRTohkFifo = open(self.currentPath + "/fifos/GPRtohk.fifo", "w")
+		self.GPRTomemFifo = open(self.currentPath + "/fifos/GPRtomem.fifo", "w")
+		self.GPRTofdirFifo = open(self.currentPath + "/fifos/GPRtofdir.fifo", "w")
+		self.GPRtoschedFifo = open(self.currentPath + "/fifos/GPRTosched.fifo", "w")
+
+		# Open all the FIFOs for receiving information from the PUS services, (created by them as well)
+		while not self.hkGroundService.wait:
+			pass
+		self.hkToGPRFifo = open(self.currentPath + "/fifos/hkToGPR.fifo", "r")
+		while not self.memoryGroundService.wait:
+			pass
+		self.memToGPRFifo = open(self.currentPath + "/fifos/memToGPR.fifo", "r")
+		while not self.schedulingGround.wait:
+			pass
+		self.fdirToGPRFifo = open(self.currentPath + "/fifos/fdirToGPR.fifo", "r")
+		while not self.FDIRGround.wait:
+			pass
+		self.schedToGPRFifo = open(self.currentPath + "/fifos/schedToGPR.fifo", "r")
+
 		# These are the actual Linux process IDs of the services which were just created.
 		self.HKPID = self.hkGroundService.pid
 		self.memPID = self.memoryGroundService.pid
@@ -638,23 +653,23 @@ class groundPacketRouter(Process):
 			cls.schedulingGround.terminate()
 
 		# Delete all the FIFO files that were created
-		os.remove("/fifos/hkToGPR.fifo")
-		os.remove("/fifos/GPRtohk.fifo")
-		os.remove("/fifos/memToGPR.fifo")
-		os.remove("/fifos/GPRtomem.fifo")
-		os.remove("/fifos/GPRtomem.fifo")
-		os.remove("/fifos/fdirToGPR.fifo")
-		os.remove("/fifos/GPRtofdir.fifo")
-		os.remove("/fifos/GPRTosched.fifo")
-		os.remove("/fifos/schedToGPR.fifo")
-		os.remove("/fifos/hktoFDIR.fifo")
-		os.remove("/fifos/memtoFDIR.fifo")
-		os.remove("/fifos/schedtoFDIR.fifo")
-		os.remove("/fifos/FDIRtohk.fifo")
-		os.remove("/fifos/FDIRtomem.fifo")
-		os.remove("/fifos/FDIRtosched.fifo")
-		os.remove("/fifos/CLIToGPR.fifo")
-		os.remove("/fifos/GPRToCLI.fifo")
+		os.remove(self.currentPath + "/fifos/hkToGPR.fifo")
+		os.remove(self.currentPath + "/fifos/GPRtohk.fifo")
+		os.remove(self.currentPath + "/fifos/memToGPR.fifo")
+		os.remove(self.currentPath + "/fifos/GPRtomem.fifo")
+		os.remove(self.currentPath + "/fifos/GPRtomem.fifo")
+		os.remove(self.currentPath + "/fifos/fdirToGPR.fifo")
+		os.remove(self.currentPath + "/fifos/GPRtofdir.fifo")
+		os.remove(self.currentPath + "/fifos/GPRTosched.fifo")
+		os.remove(self.currentPath + "/fifos/schedToGPR.fifo")
+		os.remove(self.currentPath + "/fifos/hktoFDIR.fifo")
+		os.remove(self.currentPath + "/fifos/memtoFDIR.fifo")
+		os.remove(self.currentPath + "/fifos/schedtoFDIR.fifo")
+		os.remove(self.currentPath + "/fifos/FDIRtohk.fifo")
+		os.remove(self.currentPath + "/fifos/FDIRtomem.fifo")
+		os.remove(self.currentPath + "/fifos/FDIRtosched.fifo")
+		os.remove(self.currentPath + "/fifos/CLIToGPR.fifo")
+		os.remove(self.currentPath + "/fifos/GPRToCLI.fifo")
 		return
 
 	@staticmethod
@@ -853,6 +868,12 @@ class groundPacketRouter(Process):
 		return
 
 	@staticmethod
+	def initCurrentCommand(self):
+		for i in range(0, (self.dataLength + 10)):
+			self.currentCommand.append(0)
+		return
+
+	@staticmethod
 	def receiveCommandFromFifo(self, fifo):
 		"""
 		@purpose:   This method takes a command from the the fifo "fifo" which should have a
@@ -884,6 +905,4 @@ class groundPacketRouter(Process):
 
 if __name__ == '__main__':
 	x = groundPacketRouter()
-	x.start()
-	x.stop()
-	x.terminate()
+	x.run()
