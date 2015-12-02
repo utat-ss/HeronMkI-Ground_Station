@@ -74,14 +74,16 @@ class MemoryService(PUSService):
 		0X0A 		:	"MEMORY CHECK (ABSOLUTE)"
 	}
 
-	@classmethod
-	def run(self):
+	@staticmethod
+	def run1(self):
 		"""
 		@purpose:   Used to house the main program for the memory management service.
 		@Note:		Since this class is a subclass of Process, when self.start() is executed on an
-					instance of this class, a process will be created with the contents of run() as the
+					instance of this class, a process will be created with the contents of run1() as the
 					main program.
 		"""
+		print("The path in mem run: %s" %str(self.p1))
+		self.initializePUS(self)
 		self.initialize(self)
 		while 1:
 			self.receiveCommandFromFifo(self.fifoFromGPR)		# If command in FIFO, places it in self.currentCommand[]
@@ -95,6 +97,19 @@ class MemoryService(PUSService):
 		"""
 		self.clearCurrentCommand()
 		self.logEventReport(1, self.memgroundinitialized, 0, 0, "Ground Memory Service Initialized Correctly.")
+		return
+
+	@staticmethod
+	def initializePUS(self):
+		# FIFOs Required for communication with the Ground Packet Router:
+		self.fifoFromGPR			= open(self.p2, "rb", 0)
+		#os.mkfifo(self.p1)
+		self.fifoToGPR				= open(self.p1, "wb")
+		self.fifoToGPRPath			= self.p1
+		self.wait					= 1
+		self.fifoFromGPRPath		= self.p2
+		self.createAndOpenFifoToFDIR()
+		self.openFifoFromFDIR()
 		return
 
 	@staticmethod
@@ -402,17 +417,22 @@ class MemoryService(PUSService):
 	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock,
 				 	errorLock, day, hour, minute, second):
 		# Initialize this instance as a PUS service
-		super(MemoryService, self).__init__(path1, path2, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock,
+		super(MemoryService, self).__init__(path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock,
 					cliLock, errorLock, day, hour, minute, second)
 		self.processID = 0x12
 		self.serviceType = 6
 		self.spiChip1 = 1
 		self.spiChip2 = 1
 		self.spiChip3 = 1
+		self.p1 = path1
+		self.p2 = path2
+		pID = os.fork()
+		if pID:
 
-		# FIFOs for communication with the FDIR service
-		self.fifotoFDIR = open(path3, "wb")
-		self.fifofromFDIR = open(path4, "rb")
+			self.pID = pID
+			return
+		else:
+			self.run1(self)
 
 if __name__ == '__main__':
 	pass

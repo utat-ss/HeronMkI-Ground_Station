@@ -39,7 +39,7 @@ class hkService(PUSService):
 	This class is meant to represent the PUS Housekeeping Service.
 	"""
 	# Attributes for the hkService Class
-	currentHK 			= []
+	currentHK 				= []
 	hkDefinition0 			= []
 	hkDefinition1 			= []
 	currentHKDefinition 	= []
@@ -58,20 +58,36 @@ class hkService(PUSService):
 	fifotoFDIR 				= None
 	fifofromFDIR 			= None
 
-	@classmethod
-	def run(self):
+	@staticmethod
+	def run1(self):
 		"""
 		@purpose:   Used to house the main program for the housekeeping service.
 		@Note:		Since this class is a subclass of Process, when self.start() is executed on an
-					instance of this class, a process will be created with the contents of run() as the
+					instance of this class, a process will be created with the contents of run1() as the
 					main program.
 		"""
+
+		print("The path in hk run: %s" %str(self.p1))
+		self.initializePUS(self)
 		self.initialize(self)
 
 		while 1:
 			self.receiveCommandFromFifo(self.fifoFromGPR)		# If command in FIFO, places it in self.currentCommand[]
 			self.execCommands(self)										# Deals with commands from GPR
 		return				# This should never be reached.
+
+	@staticmethod
+	def initializePUS(self):
+		# FIFOs Required for communication with the Ground Packet Router:
+		self.fifoFromGPR			= open(self.p2, "rb", 0)
+		#os.mkfifo(self.p1)
+		self.fifoToGPR				= open(self.p1, "wb")
+		self.fifoToGPRPath			= self.p1
+		self.wait					= 1
+		self.fifoFromGPRPath		= self.p2
+		self.createAndOpenFifoToFDIR()
+		self.openFifoFromFDIR()
+		return
 
 	@staticmethod
 	def initialize(self):
@@ -287,7 +303,7 @@ class hkService(PUSService):
 
 			# Send a PUS Packet to the satellite setting the hk def to the alternate one
 			self.clearCurrentCommand()
-			self.currentCommand[146] = self.clearHKDefinition
+			self.currentCommand[146] = self.newHKDefinition
 			for i in range(0, self.dataLength):
 				self.currentCommand[i] = self.hkDefinition1[i]
 			self.sendCurrentCommandToFifo(self.fifotoFDIR)
@@ -302,14 +318,24 @@ class hkService(PUSService):
 
 	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second, hkDefPath):
 		# Initialize this instance as a PUS service
-		super(hkService, self).__init__(path1, path2, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second)
+		print(path1)
+		self.p1 = path1
+		self.p2 = path2
+		super(hkService, self).__init__(path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second)
 		self.processID = 0x10
 		self.serviceType = 3
+
 		# Log for Housekeeping Parameter Reports
 		self.hkDefLog = open(hkDefPath, "a+")
-		# FIFOs for communication with the FDIR service
-		self.fifotoFDIR = open(path3, "wb")
-		self.fifofromFDIR = open(path4, "rb")
+		print("The path before forking: %s" %str(self.p1))
+		pID = os.fork()
+		if pID:
+			print("The path in the parent: %s" %str(self.p1))
+			self.pID = pID
+			return
+		else:
+			print("The path in the child: %s" %str(self.p1))
+			self.run1(self)
 
 		# Acquire some values from the satellite.
 

@@ -40,14 +40,23 @@ DEVELOPMENT HISTORY:
 
 11/20/2015			Added in Fifos so that each service can communicate with the FDIR service 
 					independently.
+
+11/26/2015			Added code for packetizeSendTelecommand()
+
+11/27/2015			Added the code for execCommands(), and started workin on the CLI.
+
+11/28/2015			I decided it makes more sense to have a separate process which shall monitor the command line
+					interface.
 """
 from HKService import *
 from FDIRService import *
 from MemoryService import *
 from SchedulingService import *
 from PUSPacket import *
-from datetime import *
+from datetime import datetime
 from multiprocessing import *
+from sys import executable
+from subprocess import Popen
 
 class groundPacketRouter(Process):
 	"""
@@ -155,24 +164,49 @@ class groundPacketRouter(Process):
 	schedulingGround		= None
 	# Packet object
 	currentPacket			= Puspacket()
-	lastPacket				= None
+	lastPacket				= currentPacket
+	sendPacket				= Puspacket()
+	lastSendPacket			= sendPacket
+	sendPacketCount			= 0
+	# Counting Attributes for the different Telecommand packets that can be sent
+	clearHKCount			= 0
+	newHKCount				= 0
+	enableParamCount		= 0
+	disableParamCount		= 0
+	requestDefReportCount	= 0
+	memoryLoadCount			= 0
+	DumpRequestCount		= 0
+	checkMemCount			= 0
+	addScheduleCount		= 0
+	clearScheduleCount		= 0
+	reportRequestCount		= 0
+	pauseScheduleCount		= 0
+	resumeScheduleCount		= 0
+	currentPath				= None
 
 	@classmethod
-	def run(self):
+	def run(cls):
 		"""
 		@purpose: Represents the main program for the ground packet router and Command-Line Interface.
 		"""
-		self.initialize(self)
+		cls.initialize(cls)
+
+		os.system("gnome-terminal --disable-factory -e {python CommandLineInterface.py}")
+		while 1:
+			response = raw_input("Enter something to kill this process")
+			if response:
+				return
 
 		while 1:
 			# Check the transceiver for an incoming packet THIS NEEDS TO PUT INCOMING TELEMETRY INTO PACKET OBJECTS
-			if self.decodeTelemetry(self, self.currentPacket) < 0:
+			if cls.decodeTelemetry(cls, cls.currentPacket) < 0:
 				# Send an error message to FDIRGround
 				pass
-			# Check FIFOs for a required action
+			cls.execCommands(cls)
 			# Check the CLI for required action
-			self.updateServiceTime(self)
-			# Make sure all the subsidiary services are still running
+			cls.updateServiceTime(cls)
+			# Make sure all the subsidiary services are still running, restart them if necessary.
+			# Check if the satellite is in reach, then send commands if it is.
 
 	@staticmethod
 	def initialize(self):
@@ -182,65 +216,61 @@ class groundPacketRouter(Process):
 					-Initializes mutex locks
 					-Creates subsidiary services for: housekeeping, memory management, failure detection isolation & recovery (FDIR)
 		"""
-		self.absTime = datetime.timedelta(0)	# Set the absolute time to zero. (for now)
+		self.absTime = datetime(2015, 1, 1, 0, 0, 0)# Set the absolute time to zero. (for now)
 		self.oldAbsTime = self.absTime
 		self.currentTime = datetime(2015, 11, 21)
 
-		self.clearCurrentCommand()
+		self.initCurrentCommand(self)
 
 		"""Get the absolute time from the satellite and update ours."""
+		self.currentPath = os.path.dirname(os.path.realpath(__file__))
+		os.chdir(self.currentPath)
+		print("Current Working Directory: %s" %self.currentPath)
 
-		# Create all the required FIFOs for PUS communicattion
-		os.mkfifo("/fifos/hkToGPR.fifo")
-		self.hkToGPRFifo = open("/fifos/hkToGPR.fifo", "rb")
-		os.mkfifo("/fifos/GPRtohk.fifo")
-		self.GPRTohkFifo = open("/fifos/GPRtohk.fifo", "wb")
-		os.mkfifo("/fifos/memToGPR.fifo")
-		self.memToGPRFifo = open("/fifos/memToGPR.fifo", "rb")
-		os.mkfifo("/fifos/GPRtomem.fifo")
-		self.GPRTomemFifo = open("/fifos/GPRtomem.fifo", "wb")
-		os.mkfifo("/fifos/fdirToGPR.fifo")
-		self.fdirToGPRFifo = open("/fifos/fdirToGPR.fifo", "rb")
-		os.mkfifo("/fifos/GPRtofdir.fifo")
-		self.GPRTofdirFifo = open("/fifos/GPRtofdir.fifo", "wb")
-		os.mkfifo("/fifos/GPRTosched.fifo")
-		self.GPRtoschedFifo = open("/fifos/GPRTosched.fifo", "wb")
-		os.mkfifo("/fifos/schedToGPR.fifo")
-		self.schedToGPRFifo = open("/fifos/schedToGPR.fifo", "rb")
+		# Create all the required FIFOs for to send information to the PUS services.
+		os.mkfifo(self.currentPath + "/fifos/GPRtohk.fifo")
+		os.mkfifo(self.currentPath + "/fifos/GPRtomem.fifo")
+		os.mkfifo(self.currentPath + "/fifos/GPRtofdir.fifo")
+		os.mkfifo(self.currentPath + "/fifos/GPRtosched.fifo")
+		os.mkfifo(self.currentPath + "/fifos/hkToGPR.fifo")
+		os.mkfifo(self.currentPath + "/fifos/memToGPR.fifo")
+		os.mkfifo(self.currentPath + "/fifos/schedToGPR.fifo")
+		os.mkfifo(self.currentPath + "/fifos/fdirToGPR.fifo")
 		# Create all the required FIFOs for the FDIR service
-		path1 = "/fifos/hktoFDIR.fifo"
-		path2 = "/fifos/memtoFDIR.fifo"
-		path3 = "/fifos/schedtoFDIR.fifo"
-		path4 = "/fifos/FDIRtohk.fifo"
-		path5 = "/fifos/FDIRtomem.fifo"
-		path6 = "/fifos/FDIRtosched.fifo"
-		os.mkfifo(path1)
-		os.mkfifo(path2)
-		os.mkfifo(path3)
-		os.mkfifo(path4)
-		os.mkfifo(path5)
-		os.mkfifo(path6)
+		path1 = self.currentPath + "/fifos/hktoFDIR.fifo"
+		path2 = self.currentPath + "/fifos/memtoFDIR.fifo"
+		path3 = self.currentPath + "/fifos/schedtoFDIR.fifo"
+		path4 = self.currentPath + "/fifos/FDIRtohk.fifo"
+		path5 = self.currentPath + "/fifos/FDIRtomem.fifo"
+		path6 = self.currentPath + "/fifos/FDIRtosched.fifo"
+		# Create the required FIFOs for the CLI
+		os.mkfifo(self.currentPath + "/fifos/GPRToCLI.fifo")
+		#self.GPRToCLIFifo = open(self.currentPath + "/fifos/GPRToCLI.fifo", "w")
+		os.mkfifo(self.currentPath + "/fifos/CLIToGPR.fifo")
+		#self.CLIToGPRFifo = open(self.currentPath + "/fifos/CLIToGPR.fifo", "r")
 		# Create all the files required for logging
 		self.eventLog = None
 		self.hkLog = None
 		self.hkDefLog = None
 		self.errorLog = None
-		eventPath = "/events/eventLog%s%s.csv" %self.currentTime.month %self.currentTime.day
+		print(self.currentTime.month)
+		print(self.currentTime.day)
+		eventPath = self.currentPath + "/events/eventLog%s.csv" %(str(self.currentTime.month) + str(self.currentTime.day))
 		if os.path.exists(eventPath):
 			self.eventLog = open(eventPath, "rb+")
 		else:
 			self.eventLog = open(eventPath, "wb")
-		hkPath = "/housekeeping/logs/hkLog%s%s.csv" %self.currentTime.month %self.currentTime.day
+		hkPath = self.currentPath + "/housekeeping/logs/hkLog%s.csv" %(str(self.currentTime.month) + str(self.currentTime.day))
 		if os.path.exists(hkPath):
 			self.hkLog = open(hkPath, "rb+")
 		else:
 			self.hkLog = open(hkPath, "wb")
-		hkDefPath = "/housekeeping/logs/hkDefLog%s%s.txt" %self.currentTime.month %self.currentTime.day
+		hkDefPath = self.currentPath + "/housekeeping/logs/hkDefLog%s.txt" %(str(self.currentTime.month) + str(self.currentTime.day))
 		if os.path.exists(hkDefPath):
 			self.hkDefLog = open(hkDefPath, "rb+")
 		else:
 			self.hkDefLog  = open(hkDefPath, "wb")
-		errorPath = "/ground_errors/errorLog%s%s.txt" %self.currentTime.month %self.currentTime.day
+		errorPath = self.currentPath + "/ground_errors/errorLog%s.txt" %(str(self.currentTime.month) + str(self.currentTime.day))
 		if os.path.exists(errorPath):
 			self.errorLog = open(errorPath, "rb+")
 		else:
@@ -257,22 +287,40 @@ class groundPacketRouter(Process):
 		self.fdirTCLock		= Lock()
 
 		# Create all the required PUS Services
-		self.hkGroundService 		= hkService("/fifos/hkToGPR.fifo", "/fifos/GPRtohk.fifo", path1, path4,
+		self.hkGroundService 		= hkService(self.currentPath + "/fifos/hkToGPR.fifo", self.currentPath + "/fifos/GPRtohk.fifo", path1, path4,
 											self.hkTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
 											self.cliLock, self.errorLock, self.absTime.day, self.absTime.hour,
 											self.absTime.minute, self.absTime.second, hkDefPath)
-		self.memoryGroundService 	= MemoryService("/fifos/memToGPR.fifo", "/fifos/GPRtomem.fifo", path2, path5,
+		self.memoryGroundService 	= MemoryService(self.currentPath + "/fifos/memToGPR.fifo", self.currentPath + "/fifos/GPRtomem.fifo", path2, path5,
 											self.memTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
 											self.cliLock, self.errorLock, self.absTime.day, self.absTime.hour,
 											self.absTime.minute, self.absTime.second)
-		self.schedulingGround		= schedulingService("/fifos/schedToGPR.fifo", "/fifos/GPRtosched.fifo", path3, path6,
+		self.schedulingGround		= schedulingService(self.currentPath + "/fifos/schedToGPR.fifo", self.currentPath + "/fifos/GPRtosched.fifo", path3, path6,
 											self.schedTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
 											self.cliLock, self.errorLock, self.absTime.day, self.absTime.hour,
 											self.absTime.minute, self.absTime.second)
-		self.FDIRGround 			= FDIRService("/fifos/fdirToGPR.fifo", "/fifos/GPRtofdir.fifo", path1, path2, path3,
+		self.FDIRGround 			= FDIRService(self.currentPath + "/fifos/fdirToGPR.fifo", self.currentPath + "/fifos/GPRtofdir.fifo", path1, path2, path3,
 											path4, path5, path6, self.fdirTCLock, eventPath, hkPath, errorPath,
 											self.eventLock, self.hkLock, self.cliLock, self.errorLock, self.absTime.day,
 											self.absTime.minute, self.absTime.minute, self.absTime.second)
+
+		print("HK PID: %s" %str(self.hkGroundService.pID))
+		print("mem PID: %s" %str(self.memoryGroundService.pID))
+		print("Sched PID: %s" %str(self.schedulingGround.pID))
+		print("FDIR PID: %s" %str(self.FDIRGround.pID))
+
+		# Open all the FIFOs TO the subsidiary services for writing
+		self.GPRTohkFifo = open(self.currentPath + "/fifos/GPRtohk.fifo", "wb")
+		self.GPRTomemFifo = open(self.currentPath + "/fifos/GPRtomem.fifo", "wb")
+		self.GPRTofdirFifo = open(self.currentPath + "/fifos/GPRtofdir.fifo", "wb")
+		self.GPRtoschedFifo = open(self.currentPath + "/fifos/GPRtosched.fifo", "wb")
+
+		# Open all the FIFOs for receiving information from the PUS services, (created by them as well)
+		self.hkToGPRFifo = open(self.currentPath + "/fifos/hkToGPR.fifo", "rb", 0)
+		self.memToGPRFifo = open(self.currentPath + "/fifos/memToGPR.fifo", "rb", 0)
+		self.fdirToGPRFifo = open(self.currentPath + "/fifos/fdirToGPR.fifo", "rb", 0)
+		self.schedToGPRFifo = open(self.currentPath + "/fifos/schedToGPR.fifo", "rb", 0)
+
 		# These are the actual Linux process IDs of the services which were just created.
 		self.HKPID = self.hkGroundService.pid
 		self.memPID = self.memoryGroundService.pid
@@ -353,30 +401,9 @@ class groundPacketRouter(Process):
 		if not currentPacket:
 			return -1
 
-		currentPacket.packetID 			= currentPacket.data[151] << 8
-		currentPacket.packetID 			|= currentPacket.data[150]
-		currentPacket.psc 				= currentPacket.data[149] << 8
-		currentPacket.psc 				|= currentPacket.data[148]
-		# Packet Header
-		currentPacket.version 			= (currentPacket.data[151] & 0xE0) >> 5
-		currentPacket.type1 			= (currentPacket.data[151] & 0x10) >> 4
-		currentPacket.dataFieldHeaderf 	= (currentPacket.data[151] & 0x08) >> 3
-		currentPacket.apid				= currentPacket.data[150]
-		currentPacket.sequenceFlags		= (currentPacket.data[149] & 0xC0) >> 6
-		currentPacket.sequenceCount		= currentPacket.data[148]
-		currentPacket.packetLengthRx	= currentPacket.data[146] + 1
-		# Data Field Header
-		currentPacket.ccsdsFlag			= (currentPacket.data[145] & 0x80) >> 7
-		currentPacket.packetVersion		= (currentPacket.data[145] & 0x70) >> 4
-		currentPacket.ack				= currentPacket.data[145] & 0x0F
-		currentPacket.serviceType		= currentPacket.data[144]
-		currentPacket.serviceSubType	= currentPacket.data[143]
-		currentPacket.sourceID			= currentPacket.data[142]
-		# Received Checksum Value
-		currentPacket.pec1 				= currentPacket.data[1] << 8
-		currentPacket.pec1 				|= currentPacket.data[0]
-		# Check that the packet error control is correct
-		currentPacket.pec0 				= self.fletcher16(2, 150, currentPacket.data)
+		# This parses through the data array and places the appropriate
+		# information in the attributes of this packet.
+		currentPacket.parseDataArray()
 
 		if self.verifyTelemetry(currentPacket) < 0:
 			return -1
@@ -601,64 +628,43 @@ class groundPacketRouter(Process):
 		self.logEventReport(1, self.incomTMSuccess, 0, 0, "Incoming Telemetry Packet Succeeded")
 		return 1
 
-	@staticmethod
-	def fletcher16(self, offset, count, *data):
-		"""
-		@purpose:   This method is to be used to compute a 16-bit checksum in the exact same
-					manner that it is computed on the satellite.
-		@param: 	*data: int array of the data you want to run the checksum on.
-		@param:		offset: Where in the array you would like to start running the checksum on.
-		@param:		count: How many elements (ints) of the array to include in the checksum.
-		@NOTE:		IMPORTANT: even though *data is an int array, each integer is only using
-					the last 8 bits (since this is meant to be used on incoming PUS packets)
-					Hence, you should create a new method if this is not the functionality you desire.
-
-		@return 	(int) The desired checksum is returned (only the lower 16 bits are used)
-		"""
-		sum1 = 0
-		sum2 = 0
-		for i in range(offset, offset + count):
-			num = data[i] & int(0x000000FF)
-			sum1 = (sum1 + num) % 255
-			sum2 = (sum2 + sum1) % 255
-		return (sum2 << 8) | sum1
-
 	@classmethod
-	def stop(self):
+	def stop(cls):
 		# Close all the files which were opened
-		self.hkToGPRFifo.close()
-		self.GPRTohkFifo.close()
-		self.memToGPRFifo.close()
-		self.GPRTomemFifo.close()
-		self.fdirToGPRFifo.close()
-		self.GPRTofdirFifo.close()
-
+		cls.hkToGPRFifo.close()
+		cls.GPRTohkFifo.close()
+		cls.memToGPRFifo.close()
+		cls.GPRTomemFifo.close()
+		cls.fdirToGPRFifo.close()
+		cls.GPRTofdirFifo.close()
 		# Kill all the children
-		if self.hkGroundService.is_alive():
-			self.hkGroundService.terminate()
-		if self.memoryGroundService.is_alive():
-			self.memoryGroundService.terminate()
-		if self.FDIRGround.is_alive():
-			self.FDIRGround.terminate()
-		if self.schedulingGround.as_alive():
-			self.schedulingGround.terminate()
+		if cls.hkGroundService.is_alive():
+			cls.hkGroundService.terminate()
+		if cls.memoryGroundService.is_alive():
+			cls.memoryGroundService.terminate()
+		if cls.FDIRGround.is_alive():
+			cls.FDIRGround.terminate()
+		if cls.schedulingGround.as_alive():
+			cls.schedulingGround.terminate()
 
 		# Delete all the FIFO files that were created
-		os.remove("/fifos/hkToGPR.fifo")
-		os.remove("/fifos/GPRtohk.fifo")
-		os.remove("/fifos/memToGPR.fifo")
-		os.remove("/fifos/GPRtomem.fifo")
-		os.remove("/fifos/GPRtomem.fifo")
-		os.remove("/fifos/fdirToGPR.fifo")
-		os.remove("/fifos/GPRtofdir.fifo")
-		os.remove("/fifos/GPRTosched.fifo")
-		os.remove("/fifos/schedToGPR.fifo")
-		os.remove("/fifos/hktoFDIR.fifo")
-		os.remove("/fifos/memtoFDIR.fifo")
-		os.remove("/fifos/schedtoFDIR.fifo")
-		os.remove("/fifos/FDIRtohk.fifo")
-		os.remove("/fifos/FDIRtomem.fifo")
-		os.remove("/fifos/FDIRtosched.fifo")
+		os.remove(self.currentPath + "/fifos/hkToGPR.fifo")
+		os.remove(self.currentPath + "/fifos/GPRtohk.fifo")
+		os.remove(self.currentPath + "/fifos/memToGPR.fifo")
+		os.remove(self.currentPath + "/fifos/GPRtomem.fifo")
+		os.remove(self.currentPath + "/fifos/GPRtomem.fifo")
+		os.remove(self.currentPath + "/fifos/fdirToGPR.fifo")
+		os.remove(self.currentPath + "/fifos/GPRtofdir.fifo")
+		os.remove(self.currentPath + "/fifos/GPRTosched.fifo")
+		os.remove(self.currentPath + "/fifos/schedToGPR.fifo")
+		os.remove(self.currentPath + "/fifos/hktoFDIR.fifo")
+		os.remove(self.currentPath + "/fifos/memtoFDIR.fifo")
+		os.remove(self.currentPath + "/fifos/schedtoFDIR.fifo")
+		os.remove(self.currentPath + "/fifos/FDIRtohk.fifo")
+		os.remove(self.currentPath + "/fifos/FDIRtomem.fifo")
+		os.remove(self.currentPath + "/fifos/FDIRtosched.fifo")
+		os.remove(self.currentPath + "/fifos/CLIToGPR.fifo")
+		os.remove(self.currentPath + "/fifos/GPRToCLI.fifo")
 		return
 
 	@staticmethod
@@ -693,6 +699,149 @@ class groundPacketRouter(Process):
 		return
 
 	@staticmethod
+	def execCommands(self):
+		self.clearCurrentCommand()
+		if self.receiveCommandFromFifo(self.hkToGPRFifo) > 0:
+			if self.currentCommand[146] == self.clearHKDefinition:
+				self.clearHKCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.clearHKDefinition,
+											  self.clearHKCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.newHKDefinition:
+				self.newHKCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.newHKDefinition,
+											  self.newHKCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.enableParamReport:
+				self.enableParamCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.enableParamReport,
+											  self.enableParamCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.disableParamReport:
+				self.disableParamCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.disableParamReport,
+											  self.disableParamCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.reportHKDefinitions:
+				self.requestDefReportCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.reportHKDefinitions,
+											  self.requestDefReportCount, 1, self.currentCommand)
+		if self.receiveCommandFromFifo(self.memToGPRFifo) > 0:
+			if self.currentCommand[146] == self.memoryLoadABS:
+				self.memoryLoadCount += 1
+				self.packetizeSendTelecommand(self.MemGroundID, self.MemoryTaskID, self.memService, self.memoryLoadABS,
+											  self.memoryLoadCount, self.currentCommand[145], self.currentCommand)
+			if self.currentCommand[146] == self.dumpRequestABS:
+				self.dumpRequestCount += 1
+				self.packetizeSendTelecommand(self.MemGroundID, self.MemoryTaskID, self.memService, self.dumpRequestABS,
+											  self.dumpRequestCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.checkMemRequest:
+				self.checkMemCount += 1
+				self.packetizeSendTelecommand(self.MemGroundId, self.MemoryTaskID, self.memService, self.checkMemRequest,
+											  self.checkMemCount, 1, self.currentCommand)
+		if self.receiveCommandFromFifo(self.fdirToGPRFifo) > 0:
+			# Deal with incoming commands from the FDIR task
+			pass
+		if self.receiveCommandFromFifo(self.schedToGPRFifo) > 0:
+			if self.currentCommand[146] == self.addSchedule:
+				self.addScheduleCount += 1
+				self.packetizeSendTelecommand(self.SchedGroundId, self.SchedulingTaskID, self.kService, self.addSchedule,
+											  self.addScheduleCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.clearSchedule:
+				self.clearScheduleCount += 1
+				self.packetizeSendTelecommand(self.SchedGroundId, self.SchedulingTaskID, self.kService, self.clearSchedule,
+											  self.clearScheduleCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.schedReportRequest:
+				self.reportRequestCount += 1
+				self.packetizeSendTelecommand(self.SchedGroundId, self.SchedulingTaskID, self.kService, self.schedReportRequest,
+											  self.reportRequestCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.pauseScheduling:
+				self.pauseScheduleCount += 1
+				self.packetizeSendTelecommand(self.SchedGroundId, self.SchedulingTaskID, self.kService, self.pauseScheduling,
+											  self.pauseScheduleCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.resumeScheduling:
+				self.resumeScheduleCount += 1
+				self.packetizeSendTelecommand(self.SchedGroundId, self.SchedulingTaskID, self.kService, self.resumeScheduling,
+											  self.resumeScheduleCount, 1, self.currentCommand)
+		return
+
+	@staticmethod
+	def packetizeSendTelecommand(self, sender, dest, serviceType, serviceSubType, packetSubCounter, numPackets, appDataArray):
+
+		sequenceCount = 1
+		packetTime =  self.absTime.day << 12
+		packetTime += self.absTime.hour << 8
+		packetTime += self.absTime.minute << 4
+		packetTime += self.absTime.second
+
+		if numPackets > 1:
+			sequenceFlags = 0x01
+		else:
+			sequenceFlags = 0x03
+
+		# Put the new packet into a linked list of packets.
+		newSendPacket = Puspacket()
+		if self.sendPacketCount == 0:
+			self.sendPacket = newSendPacket
+			self.sendPacketCount += 1
+		if self.sendPacketCount == 1:
+			self.lastSendPacket = newSendPacket
+			self.sendPacket.nextPacket = self.lastSendPacket
+			self.lastSendPacket.prevPacket = self.sendPacket
+			self.sendPacketCount += 1
+		elif self.sendPacketCount > 1:
+			self.lastSendPacket.nextPacket = newSendPacket
+			newSendPacket.prevPacket = self.lastSendPacket
+			self.lastSendPacket = newSendPacket
+			self.sendPacketCount += 1
+		# Get the application data for the new packet
+		for i in range(0, self.dataLength):
+			newSendPacket.appData[i] = appDataArray[i]
+		# Fill in the attributes for the new packet
+		newSendPacket.version = 0	# Default is 0
+		newSendPacket.type1 = 1		# TC = 1
+		newSendPacket.ccsdsFlag = 1
+		newSendPacket.sender = sender
+		newSendPacket.sequenceFlags = sequenceFlags
+		newSendPacket.sequenceCount = sequenceCount
+		newSendPacket.serviceType = serviceType
+		newSendPacket.serviceSubType = serviceSubType
+		newSendPacket.packetSubCounter = packetSubCounter
+		newSendPacket.dest = dest
+		newSendPacket.day = self.absTime.day
+		newSendPacket.hour = self.absTime.hour
+		newSendPacket.minute = self.absTime.minute
+		newSendPacket.second = self.absTime.second
+		# Format the actual data array for the packet.
+		newSendPacket.formatDataArray()
+
+		if numPackets == 1:
+			return 1
+
+		# numPackets != 1
+		for i in range(0, numPackets):
+			newSendPacket.data[148] = sequenceCount
+			sequenceCount += 1
+			if i > 1:
+				sequenceFlags = 0x00
+			if i == (numPackets - 1):
+				sequenceFlags = 0x02
+			newSendPacket.data[149] = (sequenceFlags & 0x03) << 6
+			for j in range(2, (self.packetLength - 13)):
+				newSendPacket.data[j] = appDataArray[j + i * 128]
+			# Format the packet again.
+			newSendPacket.formatDataArray()
+			# Insert the new packet into the linked list for sending
+			self.lastSendPacket.nextPacket = newSendPacket
+			newSendPacket.prevPacket = self.lastSendPacket
+			self.lastSendPacket = newSendPacket
+			self.sendPacketCount += 1
+			# Create a new pus packet object to work with
+			newSendPacket = Puspacket()
+		return
+
+	@staticmethod
+	def sendPusPacketTC(self):
+		# To be implemented later.
+		pass
+
+	@staticmethod
 	def logError(self, errorString):
 		self.errorLock.acquire()
 		self.errorLog.write("******************ERROR START****************\n")
@@ -713,6 +862,34 @@ class groundPacketRouter(Process):
 			self.currentCommand[i] = 0
 		return
 
+	@staticmethod
+	def initCurrentCommand(self):
+		for i in range(0, (self.dataLength + 10)):
+			self.currentCommand.append(0)
+		return
+
+	@staticmethod
+	def receiveCommandFromFifo(self, fifo):
+		"""
+		@purpose:   This method takes a command from the the fifo "fifo" which should have a
+		length of 147 bytes & places it into the array self.currentCommand[].
+		@Note: We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
+		"""
+		self.clearCurrentCommand()
+		if os.path.getsize(fifo) > 152:
+			i = 0
+			if fifo.readline() == "START\n":
+				# Start reading in the command.
+				newString = fifo.readline()
+				newString = newString.rstrip()
+				while (newString != "STOP") and (i < (self.dataLength + 11)):
+					self.currentCommand[i] = int(newString)
+					newString = fifo.readline()
+					newString = newString.rstrip()
+					i += 1
+				return 1
+		return -1
+
 	def __init__(self):
 		"""
 		@purpose: Initialization method for the Ground Packet Router Class
@@ -723,6 +900,4 @@ class groundPacketRouter(Process):
 
 if __name__ == '__main__':
 	x = groundPacketRouter()
-	x.start()
-	x.stop()
-	x.terminate()
+	x.run()

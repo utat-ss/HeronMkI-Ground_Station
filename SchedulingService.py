@@ -21,8 +21,8 @@ NOTES:				For the sake of human readability and computer readability, we are goi
 					Human Format:
 
 					TIME			APID		COMMAND		CID			SEV		PARAM				COMPLETED		COMMENT
-					DD/HH/MM/SS		0xFF		0xFF		0x0000		0|1|2	0xFFFFFFFFFFFF		N|Y|F|E			payload stuff
-																							(E = erased, F = failed)
+					DD/HH/MM/SS		0xFF		0xFF		0x0000		0|1|2	0xFFFFFFFFFFFF		N|Y|F|E|W		payload stuff
+																							(E = erased, F = failed, W = waiting)
     				APID: Software ID for the process/SSM on the OBC that you are sending this command for.
 
     				COMMAND: Unique identifier for the command being sent (to be added in the future)
@@ -85,11 +85,15 @@ DEVELOPMENT HISTORY:
 11/26/2015
 					Alright, as far as I can tell, the scheduling service code is complete.
 
+11/27/2015			I'm adding a new state for the commands in the human schedule - "W" - which stands for "waiting",
+					meaning we've sent the command to the satellite and are waiting on the completion.
+
 """
 
 import os
 from multiprocessing import *
 from PUSService import *
+from datetime import *
 
 class schedulingService(PUSService):
 	"""
@@ -108,7 +112,7 @@ class schedulingService(PUSService):
 	cSchedFile	= None
 	incomingSatelliteSchedule = []
 	numIncomingCommands = 0
-	schedWaitTime = datetime.timedelta(0)
+	schedWaitTime = timedelta(0)
 	schedOperations ={
 		0x01			: "ADD SCHEDULE",
 		0x02			: "CLEAR SCHEDULE",
@@ -118,16 +122,18 @@ class schedulingService(PUSService):
 		0x07			: "UPDATING SCHEDULE"
 	}
 
-	@classmethod
-	def run(self):
+	@staticmethod
+	def run1(self):
 		"""
 		@purpose:   Used to house the main program for the scheduling service.
 		@Note:		Since this class is a subclass of Process, when self.start() is executed on an
-					instance of this class, a process will be created with the contents of run() as the
+					instance of this class, a process will be created with the contents of run1() as the
 					main program.
 		@Note:		The scheduling service shall ask for a schedule report from the satellite in order to update
 					the schedule roughly once every minute.
 		"""
+		print("The path in sched run: %s" %str(self.p1))
+		self.initializePUS(self)
 		self.initialize(self)
 		while 1:
 			self.receiveCommandFromFifo(self.fifoFromGPR)
@@ -159,7 +165,7 @@ class schedulingService(PUSService):
 			self.requestSchedReport()
 		if self.currentCommand[146] == self.schedReport:
 			self.processSchedReport()
-		if self.currentCommand[146] == self.schedCommandCompleted:		# Event reports on completed command should be going here.
+		if self.currentCommand[146] == self.updatingSchedule:		# Event reports on completed command should be going here.
 			self.updateScheduleWithCommandStatus()
 		if self.currentCommand[146] == self.pauseScheduling:
 			self.pauseTheDamnScheduling()
@@ -251,6 +257,9 @@ class schedulingService(PUSService):
 				newCommandArray[(numNewCommands * 2) - (i * 2 + 1)] = (commandAPID << 24) + (commandID << 16) + (commandSeverity << 8) + ((cID & 0xFF00) >> 8)
 				newCommandArray[(numNewCommands * 2) - (i * 2 + 2)] = ((cID & 0x00FF) << 24) + (commandStatus << 16) + int((commandParam & 0xFFFF00000000) >> 32)
 				newCommandArray[(numNewCommands * 2) - (i * 2 + 3)] = int(commandParam & 0x0000FFFFFFFF)
+				# Set the item to "waiting" so that we don't keep sending it to the satellite.
+				items1[6] = "W"
+
 		#Send the commands to the OBC, one packet @ a time.
 		self.sendCommandsToOBC(numNewCommands, newCommandArray)
 		return
@@ -309,23 +318,27 @@ class schedulingService(PUSService):
 					self.currentCommand[j - 2] 	= (tempTime & 0x0000FF00) >> 8
 					self.currentCommand[j - 3] 	= tempTime & 0x000000FF
 					self.currentCommand[j - 4] 	= (tempInt2 & 0xFF000000) >> 24
-					self.currentCommand[j - 5] 	= (tempInt2 & 0xFF000000) >> 16
-					self.currentCommand[j - 6] 	= (tempInt2 & 0xFF000000) >> 8
-					self.currentCommand[j - 7] 	= tempInt2 & 0xFF000000
+					self.currentCommand[j - 5] 	= (tempInt2 & 0x00FF0000) >> 16
+					self.currentCommand[j - 6] 	= (tempInt2 & 0x0000FF00) >> 8
+					self.currentCommand[j - 7] 	= tempInt2 & 0x000000FF
 					self.currentCommand[j - 8] 	= (tempInt3 & 0xFF000000) >> 24
-					self.currentCommand[j - 9] 	= (tempInt3 & 0xFF000000) >> 16
-					self.currentCommand[j - 10] 	= (tempInt3 & 0xFF000000) >> 8
-					self.currentCommand[j - 11] 	= tempInt3 & 0xFF000000
+					self.currentCommand[j - 9] 	= (tempInt3 & 0x00FF0000) >> 16
+					self.currentCommand[j - 10] 	= (tempInt3 & 0x0000FF00) >> 8
+					self.currentCommand[j - 11] 	= tempInt3 & 0x000000FF
 					self.currentCommand[j - 12] 	= (tempInt4 & 0xFF000000) >> 24
-					self.currentCommand[j - 13] 	= (tempInt4 & 0xFF000000) >> 16
-					self.currentCommand[j - 14] 	= (tempInt4 & 0xFF000000) >> 8
-					self.currentCommand[j - 15] 	= tempInt4 & 0xFF000000
+					self.currentCommand[j - 13] 	= (tempInt4 & 0x00FF0000) >> 16
+					self.currentCommand[j - 14] 	= (tempInt4 & 0x0000FF00) >> 8
+					self.currentCommand[j - 15] 	= tempInt4 & 0x000000FF
 				# Send the command to the GPR to be sent to the OBC
 				self.sendCurrentCommandToFifo(self.fifoToGPR)
 				# Wait for TC verification from the satellite
 				if self.waitForTCVerification(1000, self.addSchedule) < 0:
+					# Set all the commands which were "waiting" back to "N" == 0.
+					for j in range(127, -1, -16):
+						cID = self.currentCommand[j - 7] << 8
+						cID += self.currentCommand[j - 8]
+						self.updateScheduleWithCommandStatus(cID, 0)
 					return
-
 			if leftOver:
 				self.printToCLI("SENDING COMMAND PACKET %s OF %s\n" %str(numPackets) %str(numPackets))
 				self.clearCurrentCommand()
@@ -394,6 +407,11 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def clearTheSchedule(self):
+		"""
+		@purpose: 	This method will first update the current schedule, then set all commands in the human schedule
+					which are currently set to "N" as "E" meaning -erased-, It will also clear the local computer
+					schedule of any commands and clear the satellite's schedule.
+		"""
 		tempWait = datetime.timedelta(0)
 		# First get a schedule report from the satellite in case some actions were completed very recently.
 		self.requestSchedReport()
@@ -406,7 +424,7 @@ class schedulingService(PUSService):
 		if self.currentCommand[146] != self.schedReport:
 			self.printToCLI("CANNOT CLEAR SCHEDULE, SCHEDULE REPORT TOOK TOO LONG TO COME BACK.\n")
 			self.logError("CANNOT CLEAR SCHEDULE, SCHEDULE REPORT TOOK TOO LONG TO COME BACK.")
-			self.execCommands() # Run the command which we might currently have.
+			self.execCommands() # run1 the command which we might currently have.
 			self.clearCurrentCommand()
 			self.currentCommand[146] = self.clearSchedule
 			self.sendCurrentCommandToFifo(self.fifotoFDIR)		# Send the command to the FDIR task.
@@ -430,6 +448,10 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def eraseCommandsInHumanSchedule(self):
+		"""
+		@purpose: 	This method is a helper for clearTheSchedule() as it performs the actual action of
+		 going through the human schedule and setting the status of each command currently "N" to "E"
+		"""
 		lCount = 0
 		for line in self.hSchedFile:
 			tempString = line.rstrip()
@@ -456,6 +478,11 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def clearTheScheduleH(self):
+		"""
+		@purpose: 	This method sends a command to GPR which we intend to be telecommanded to the satellite.
+					If this command is followed through, the schedule on the satellite shall be cleared.
+		@reeturn:	1 is success, -1 = failure
+		"""
 		self.currentCommand[146] = self.clearSchedule
 		self.sendCurrentCommandToFifo(self.fifotoGPR)
 		if self.waitForTCVerification(5000, self.clearSchedule) < 0:	# Wait max of 5s for the TC verification
@@ -465,6 +492,10 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def requestSchedReport(self):
+		"""
+		@purpose: 	This method sends a command to GPR to be telecommanded to the satellite.
+					If this command is followed through, a schedule report should be downlinked by the satellite.
+		"""
 		self.currentCommand[146] = self.schedReportRequest
 		self.sendCurrentCommandToFifo(self.fifotoGPR)
 		self.waitForTCVerification(5000, self.schedReportRequest)
@@ -472,14 +503,21 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def clearComputerSchedule(self):
+		"""
+		@purpose: 	This method is a helper to createTheSchedule(), and clears the local computer schedule of commands.
+		"""
 		self.cSchedFile.seek(0)
-		self.cSchedFile.truncate()
+		self.cSchedFile.trun1cate()
 		return
 
 	@staticmethod
 	def updateScheduleAutomatically(self):
+		"""
+		@purpose: 	This method will check whether the time since the last schedule update has surpassed 60 seconds,
+					if it has, then we request a schedule report which shall update the schedule if there are any changes.
+		"""
 		if self.schedWaitTime.seconds > 60:
-			self.schedWaitTime = datetime.timedelta(0)
+			self.schedWaitTime = timedelta(0)
 			self.requestSchedReport()
 			if self.waitForTCVerification(5000, self.updatingSchedule) < 0:
 				return
@@ -489,6 +527,13 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def processSchedReport(self):
+		"""
+		@purpose: 	This method is used when a schedule report is being received / is received from the satellite.
+					The main thing that we want to check is that the number of commands contained on the satellite
+					is equal to the number of commands contained on the ground schedule (+- a couple)
+		@Note:		I keep track of the fact that the schedule report is going to downlinked in PUS-sized pieces.
+
+		"""
 
 		# Figure out approximately how many packets there are going to be.
 		self.cSchedFile.seek(0)
@@ -522,11 +567,15 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def turnCommandArrayIntoSchedReport(self, numCommands, commandArray):
-
+		"""
+		@purpose: 	This helper method takes an array commands formatted in the PUS, the same in the computer schedule
+					and shown in the notes for the file header at the top of this file.
+					It then takes these commands and parses them into what we want as a "human schedule"
+		"""
 		newPath = "schedule/reports/schedReport%s" %str(self.schedReportCount)
 		schedFile = open(newPath, "wb")
 		schedFile.seek(0)
-		schedFile.truncate()
+		schedFile.trun1cate()
 		schedFile.write("TIME			APID		COMMAND		CID			SEV		PARAM				COMPLETED		COMMENT\n")
 		pos = 1
 		for i in range(1, numCommands + 1, 4):
@@ -551,6 +600,12 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def processSchedReportH(self):
+		"""
+		@purpose: 	This method is a helper to processSchedControl(), this method does the actual work of keeping
+					track of sequence control on the incoming packets and letting the main method know when an
+					entire schedule report has been received.
+
+		"""
 		# This array is going to contain all the commands currently being stored on the schedule in the satellite.
 		obcSequenceFlags	= (self.currentCommand[143] & 0xC0) >> 6
 		obcSequenceCount	= self.currentCommand[142]
@@ -627,16 +682,29 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def clearIncomingSatSchedule(self):
+		"""
+		@purpose: 	Clears the list self.incomingSatelliteSchedule[]
+
+		"""
 		for i in range(0, self.maxCommands):
 			self.incomingSatelliteSchedule[i] = 0
 		return
 
 	@staticmethod
-	def updateScheduleWithCommandStatus(self):
+	def updateScheduleWithCommandStatus(self, newcID=0, newstatus=0):
+		"""
+		@purpose: 	This method is used when a command completion report (for a scheduled command) is being received.
+		@Note:		The CID and status of the command can be provided or this method will utilize what is stored in
+					self.currentCommand[]
+		"""
 		# A scheduled command report was just received, update the human schedule
-		cID = self.currentCommand[2] << 8
-		cID += self.currentCommand[1]
-		status = self.currentCommand[0]
+		if not newcID:
+			cID = self.currentCommand[2] << 8
+			cID += self.currentCommand[1]
+			status = self.currentCommand[0]
+		else:
+			cID = newcID
+			status = newstatus
 		statString = None
 		if status == 0:
 			return
@@ -646,6 +714,8 @@ class schedulingService(PUSService):
 			statString = "F"
 		if status == 3:
 			statString = "E"
+		if status == 4:
+			statString = "W"
 
 		pos = 0
 		for line in self.hSchedFile:
@@ -712,6 +782,10 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def pauseTheDamnScheduling(self):
+		"""
+		@purpose: 	This method sends a command to GPR to be telecommanded to the satellite, the result of this
+					command is that scheduled operations on the satellite are temporarily paused.
+		"""
 		self.currentCommand[146] = self.pauseScheduling
 		self.sendCurrentCommandToFifo(self.fifotoGPR)
 		self.waitForTCVerification(5000, self.schedReportRequest)
@@ -719,20 +793,41 @@ class schedulingService(PUSService):
 
 	@staticmethod
 	def resumeTheDamnScheduling(self):
+		"""
+		@purpose: 	This method sends a command to GPR to be telecommanded to the satellite, the result of this
+					command is that scheduled operations on the satellite are resumed. (No effect if already running)
+		"""
 		self.currentCommand[146] = self.resumeScheduling
 		self.sendCurrentCommandToFifo(self.fifotoGPR)
 		self.waitForTCVerification(5000, self.schedReportRequest)
 		return
 
+	@staticmethod
+	def initializePUS(self):
+		# FIFOs Required for communication with the Ground Packet Router:
+		self.fifoFromGPR			= open(self.p2, "rb", 0)
+		#os.mkfifo(self.p1)
+		self.fifoToGPR				= open(self.p1, "wb")
+		self.fifoToGPRPath			= self.p1
+		self.wait					= 1
+		self.fifoFromGPRPath		= self.p2
+		self.createAndOpenFifoToFDIR()
+		self.openFifoFromFDIR()
+		return
+
 	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock,
 							errorLock, day, hour, minute, second):
 		# Initialize this instance as a PUS service
-		super(schedulingService, self).__init__(path1, path2, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock,
+		super(schedulingService, self).__init__(path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock,
 							cliLock, errorLock, day, hour, minute, second)
-
-		# FIFOs for communication with the FDIR service
-		self.fifotoFDIR = open(path3, "wb")
-		self.fifofromFDIR = open(path4, "rb")
+		self.p1 = path1
+		self.p2 = path2
+		pID = os.fork()
+		if pID:
+			self.pID = pID
+			return
+		else:
+			self.run1(self)
 
 if __name__ == '__main__':
 	pass
