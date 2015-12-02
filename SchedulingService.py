@@ -132,6 +132,7 @@ class schedulingService(PUSService):
 		@Note:		The scheduling service shall ask for a schedule report from the satellite in order to update
 					the schedule roughly once every minute.
 		"""
+		print("The path in sched run: %s" %str(self.p1))
 		self.initializePUS(self)
 		self.initialize(self)
 		while 1:
@@ -804,11 +805,11 @@ class schedulingService(PUSService):
 	@staticmethod
 	def initializePUS(self):
 		# FIFOs Required for communication with the Ground Packet Router:
-		os.mkfifo(self.p1)
+		self.fifoFromGPR			= open(self.p2, "rb", 0)
+		#os.mkfifo(self.p1)
 		self.fifoToGPR				= open(self.p1, "wb")
 		self.fifoToGPRPath			= self.p1
 		self.wait					= 1
-		self.fifoFromGPR			= open(self.p2, "rb")
 		self.fifoFromGPRPath		= self.p2
 		self.createAndOpenFifoToFDIR()
 		self.openFifoFromFDIR()

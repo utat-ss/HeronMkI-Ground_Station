@@ -79,11 +79,11 @@ class hkService(PUSService):
 	@staticmethod
 	def initializePUS(self):
 		# FIFOs Required for communication with the Ground Packet Router:
-		os.mkfifo(self.p1)
+		self.fifoFromGPR			= open(self.p2, "rb", 0)
+		#os.mkfifo(self.p1)
 		self.fifoToGPR				= open(self.p1, "wb")
 		self.fifoToGPRPath			= self.p1
 		self.wait					= 1
-		self.fifoFromGPR			= open(self.p2, "rb")
 		self.fifoFromGPRPath		= self.p2
 		self.createAndOpenFifoToFDIR()
 		self.openFifoFromFDIR()

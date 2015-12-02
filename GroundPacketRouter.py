@@ -231,8 +231,11 @@ class groundPacketRouter(Process):
 		os.mkfifo(self.currentPath + "/fifos/GPRtohk.fifo")
 		os.mkfifo(self.currentPath + "/fifos/GPRtomem.fifo")
 		os.mkfifo(self.currentPath + "/fifos/GPRtofdir.fifo")
-		os.mkfifo(self.currentPath + "/fifos/GPRTosched.fifo")
-
+		os.mkfifo(self.currentPath + "/fifos/GPRtosched.fifo")
+		os.mkfifo(self.currentPath + "/fifos/hkToGPR.fifo")
+		os.mkfifo(self.currentPath + "/fifos/memToGPR.fifo")
+		os.mkfifo(self.currentPath + "/fifos/schedToGPR.fifo")
+		os.mkfifo(self.currentPath + "/fifos/fdirToGPR.fifo")
 		# Create all the required FIFOs for the FDIR service
 		path1 = self.currentPath + "/fifos/hktoFDIR.fifo"
 		path2 = self.currentPath + "/fifos/memtoFDIR.fifo"
@@ -307,24 +310,16 @@ class groundPacketRouter(Process):
 		print("FDIR PID: %s" %str(self.FDIRGround.pID))
 
 		# Open all the FIFOs TO the subsidiary services for writing
-		self.GPRTohkFifo = open(self.currentPath + "/fifos/GPRtohk.fifo", "w")
-		self.GPRTomemFifo = open(self.currentPath + "/fifos/GPRtomem.fifo", "w")
-		self.GPRTofdirFifo = open(self.currentPath + "/fifos/GPRtofdir.fifo", "w")
-		self.GPRtoschedFifo = open(self.currentPath + "/fifos/GPRTosched.fifo", "w")
+		self.GPRTohkFifo = open(self.currentPath + "/fifos/GPRtohk.fifo", "wb")
+		self.GPRTomemFifo = open(self.currentPath + "/fifos/GPRtomem.fifo", "wb")
+		self.GPRTofdirFifo = open(self.currentPath + "/fifos/GPRtofdir.fifo", "wb")
+		self.GPRtoschedFifo = open(self.currentPath + "/fifos/GPRtosched.fifo", "wb")
 
 		# Open all the FIFOs for receiving information from the PUS services, (created by them as well)
-		while not self.hkGroundService.wait:
-			pass
-		self.hkToGPRFifo = open(self.currentPath + "/fifos/hkToGPR.fifo", "r")
-		while not self.memoryGroundService.wait:
-			pass
-		self.memToGPRFifo = open(self.currentPath + "/fifos/memToGPR.fifo", "r")
-		while not self.schedulingGround.wait:
-			pass
-		self.fdirToGPRFifo = open(self.currentPath + "/fifos/fdirToGPR.fifo", "r")
-		while not self.FDIRGround.wait:
-			pass
-		self.schedToGPRFifo = open(self.currentPath + "/fifos/schedToGPR.fifo", "r")
+		self.hkToGPRFifo = open(self.currentPath + "/fifos/hkToGPR.fifo", "rb", 0)
+		self.memToGPRFifo = open(self.currentPath + "/fifos/memToGPR.fifo", "rb", 0)
+		self.fdirToGPRFifo = open(self.currentPath + "/fifos/fdirToGPR.fifo", "rb", 0)
+		self.schedToGPRFifo = open(self.currentPath + "/fifos/schedToGPR.fifo", "rb", 0)
 
 		# These are the actual Linux process IDs of the services which were just created.
 		self.HKPID = self.hkGroundService.pid
