@@ -29,8 +29,8 @@ class CommandLineInterface():
     """
     This class is meant to represent the PUS FDIR Service.
     """
-    OBCToCLIFifo = None
-    CLIToOBCFifo = None
+    GPRToCLIFifo = None
+    CLIToGPRFifo = None
     processID    = 0x16
 
     @classmethod
@@ -47,11 +47,22 @@ class CommandLineInterface():
             if commandString == "kill":
                 return
 
+    @classmethod
+    def stop(cls):
+        try:
+            cls.GPRToCLIFifo.close()
+            cls.CLIToGPRFifo.close()
+        except:
+            pass
+        return
+
     def __init__(self, path1, path2):
         # FIFOs for communication with the Ground Packet Router
-        self.GPRToCLIFifo 		= open(path1, "rb")
+        self.GPRToCLIFifo 		= open(path1, "rb", 0)
         self.CLIToFPRFifo 		= open(path2, "wb")
 
 if __name__ == '__main__':
     CLI = CommandLineInterface("/fifos/GPRToCLI.fifo", "fifos/CLIToGPR.fifo")
     CLI.run()
+    CLI.stop()
+    print("THE COMMAND LINE INTERFACE HAS STOPPED")
