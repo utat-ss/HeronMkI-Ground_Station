@@ -58,6 +58,13 @@ class hkService(PUSService):
 	# FIFOs for communication with the FDIR service
 	fifotoFDIR 				= None
 	fifofromFDIR 			= None
+	hkOperations ={
+		0x01		:	"ALTERNATE HK DEFINITION",
+		0X03		:	"CLEAR HK DEFINITION",
+		0x05		:	"ENABLE PARAM REPORT",
+		0X06		:	"DISABLE PARAM REPORT",
+		0X09 		:	"REPORT HK DEFINITION"
+	}
 
 	@staticmethod
 	def run1(self):
@@ -274,9 +281,6 @@ class hkService(PUSService):
 		@Note:		The new housekeeping parameter report should replace hkDefinition1.txt & have an sID of 1.
 		"""
 		defPath = "/housekeeping/definitions/hkDefinition1.txt"
-		sID = 0
-		tempString = None
-		paramNum = 0
 		if os.path.exists(defPath):
 			hkdef = open(defPath, "rb")
 			sID = int(hkdef.read(1))
@@ -309,6 +313,7 @@ class hkService(PUSService):
 			for i in range(0, self.dataLength):
 				self.currentCommand[i] = self.hkDefinition1[i]
 			self.sendCurrentCommandToFifo(self.fifotoFDIR)
+			self.waitForTCVerification(5000, self.newHKDefinition)
 			# Send a PUS packet to the satellite requesting a parameter report
 			self.requestHKParamReport()
 			return
@@ -317,6 +322,33 @@ class hkService(PUSService):
 			self.printtoCLI("hkDefinition1.txt does not exist, denying definition update")
 			self.logError("hkDefinition1.txt does not exist, denying definition update\n")
 			return
+
+	@staticmethod
+	def waitForTCVerification(self, timeOut, operation):
+		"""
+		@purpose: 	This method is used to put the current service on hold until a successful TC Acceptance
+					report has been received.
+		@param:		timeOut: This method will wait for a maximum of 'timeOut' milliseconds for the verification to be
+					received.
+		@param:		operation: is the code for the operation to be completed
+		"""
+		waitTime = datetime.timedelta(0)
+		while (waitTime.milliseconds < timeOut) and (not self.tcAcceptVerification):
+			pass
+		if waitTime > timeOut:
+			self.printToCLI("HOUSEKEEPING SERVICE OPERATION: %s HAS FAILED\n" %self.hkOperations[operation])
+			self.logError("HOUSEKEEPING SERVICE OPERATION: %s HAS FAILED" %self.hkOperations[operation])
+			self.currentCommand[146] = operation
+			self.sendCurrentCommandToFifo(self.fifotoFDIR)
+			return -1
+		else:
+			self.logEventReport(1, operation, 0, 0,
+								"HOUSEKEEPING SERVICE OPERATION: %s HAS SUCCEEDED" %self.hkOperations[operation])
+			self.tcLock.acquire()
+			self.tcAcceptVerification = 0
+			self.tcExecuteVerification = 0
+			self.tcLock.release()
+			return 1
 
 	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second, hkDefPath):
 		# Initialize this instance as a PUS service
