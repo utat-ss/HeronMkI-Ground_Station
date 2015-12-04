@@ -108,6 +108,12 @@ class FifoObject:
             return 1
         return 0
 
+    @classmethod
+    def close(cls):
+        if cls.fifoFD:
+            cls.fifoFD.close()
+        return
+
     @staticmethod
     def clearTempCommand(self):
         for i in range(0, 147):
@@ -126,7 +132,7 @@ class FifoObject:
         if Type:
             self.fifoFD = open(FifoPath, "wb")
         if not Type:
-            self.fifoID = open(FifoPath, "rb", 0)
+            self.fifoFD = open(FifoPath, "rb", 0)
         for i in range(0, 147):
             self.tempCommand.append(0)
             self.command.append(0)

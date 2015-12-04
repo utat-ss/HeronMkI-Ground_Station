@@ -194,7 +194,9 @@ class groundPacketRouter(Process):
 		"""
 		cls.initialize(cls)
 
-		os.system("gnome-terminal --disable-factory -e {python CommandLineInterface.py}")
+		#os.system("gnome-terminal --disable-factory -e {python CommandLineInterface.py}")
+		cls.GPRtoCLIFifo = FifoObject(cls.currentPath + "/fifos/GPRToCLI.fifo", 1)
+		cls.CLIToGPRFifo = FifoObject(cls.currentPath + "/fifos/CLIToGPR.fifo", 0)
 		while 1:
 			response = raw_input("Enter something to kill this process")
 			if response:
@@ -311,7 +313,7 @@ class groundPacketRouter(Process):
 		self.FDIRGround 			= FDIRService(self.currentPath + "/fifos/fdirToGPR.fifo", self.currentPath + "/fifos/GPRtofdir.fifo", path1, path2, path3,
 											path4, path5, path6, self.fdirTCLock, eventPath, hkPath, errorPath,
 											self.eventLock, self.hkLock, self.cliLock, self.errorLock, self.absTime.day,
-											self.absTime.minute, self.absTime.minute, self.absTime.second)
+											self.absTime.hour, self.absTime.minute, self.absTime.second)
 
 		print("HK PID: %s" %str(self.hkGroundService.pID))
 		print("mem PID: %s" %str(self.memoryGroundService.pID))
@@ -325,9 +327,9 @@ class groundPacketRouter(Process):
 		self.GPRTohkFifo = FifoObject(self.currentPath + "/fifos/GPRtosched.fifo", 1)
 		# Open all the FIFOs for receiving information from the PUS services, (created by them as well)
 		self.hkToGPRFifo = FifoObject(self.currentPath + "/fifos/hkToGPR.fifo", 0)
-		self.memToGPRFifo = FifoObject(self.currentPath + "/fifos/GPRtohk.fifo", 0)
-		self.fdirToGPRFifo = FifoObject(self.currentPath + "/fifos/GPRtohk.fifo", 0)
-		self.schedTiGPRFifo = FifoObject(self.currentPath + "/fifos/GPRtohk.fifo", 0)
+		self.memToGPRFifo = FifoObject(self.currentPath + "/fifos/memToGPR.fifo", 0)
+		self.fdirToGPRFifo = FifoObject(self.currentPath + "/fifos/fdirToGPR.fifo", 0)
+		self.schedToGPRFifo = FifoObject(self.currentPath + "/fifos/schedToGPR.fifo", 0)
 		# These are the actual Linux process IDs of the services which were just created.
 		self.HKPID = self.hkGroundService.pid
 		self.memPID = self.memoryGroundService.pid
@@ -641,25 +643,14 @@ class groundPacketRouter(Process):
 		cls.GPRTomemFifo.close()
 		cls.fdirToGPRFifo.close()
 		cls.GPRTofdirFifo.close()
-		# Kill all the children
-		if cls.hkGroundService.is_alive():
-			cls.hkGroundService.terminate()
-		if cls.memoryGroundService.is_alive():
-			cls.memoryGroundService.terminate()
-		if cls.FDIRGround.is_alive():
-			cls.FDIRGround.terminate()
-		if cls.schedulingGround.as_alive():
-			cls.schedulingGround.terminate()
-
 		# Delete all the FIFO files that were created
 		os.remove(cls.currentPath + "/fifos/hkToGPR.fifo")
 		os.remove(cls.currentPath + "/fifos/GPRtohk.fifo")
 		os.remove(cls.currentPath + "/fifos/memToGPR.fifo")
 		os.remove(cls.currentPath + "/fifos/GPRtomem.fifo")
-		os.remove(cls.currentPath + "/fifos/GPRtomem.fifo")
 		os.remove(cls.currentPath + "/fifos/fdirToGPR.fifo")
 		os.remove(cls.currentPath + "/fifos/GPRtofdir.fifo")
-		os.remove(cls.currentPath + "/fifos/GPRTosched.fifo")
+		os.remove(cls.currentPath + "/fifos/GPRtosched.fifo")
 		os.remove(cls.currentPath + "/fifos/schedToGPR.fifo")
 		os.remove(cls.currentPath + "/fifos/hktoFDIR.fifo")
 		os.remove(cls.currentPath + "/fifos/memtoFDIR.fifo")
@@ -901,3 +892,4 @@ class groundPacketRouter(Process):
 if __name__ == '__main__':
 	x = groundPacketRouter()
 	x.run()
+	x.stop()

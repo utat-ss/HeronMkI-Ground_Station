@@ -24,6 +24,8 @@ DEVELOPMENT HISTORY:
 11/28/2015			Created.
 
 """
+from FifoObject import *
+import os
 
 class CommandLineInterface():
     """
@@ -42,7 +44,7 @@ class CommandLineInterface():
                     main program.
         """
         while 1:
-            commandString = raw_input("Enter a command / command file")
+            commandString = raw_input("Enter a command / command file: ")
             print("\nYou entered: %s\n" %commandString)
             if commandString == "kill":
                 return
@@ -58,11 +60,12 @@ class CommandLineInterface():
 
     def __init__(self, path1, path2):
         # FIFOs for communication with the Ground Packet Router
-        self.GPRToCLIFifo 		= open(path1, "rb", 0)
-        self.CLIToFPRFifo 		= open(path2, "wb")
+        self.currentPath = os.path.dirname(os.path.realpath(__file__))
+        self.GPRToCLIFifo 		= FifoObject(self.currentPath + path1, 0)
+        self.CLIToGPRFifo 		= FifoObject(self.currentPath + path2, 1)
 
 if __name__ == '__main__':
-    CLI = CommandLineInterface("/fifos/GPRToCLI.fifo", "fifos/CLIToGPR.fifo")
+    CLI = CommandLineInterface("/fifos/GPRToCLI.fifo", "/fifos/CLIToGPR.fifo")
     CLI.run()
     CLI.stop()
     print("THE COMMAND LINE INTERFACE HAS STOPPED")
