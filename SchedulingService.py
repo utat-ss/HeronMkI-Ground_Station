@@ -211,9 +211,18 @@ class schedulingService(PUSService):
 		# This method will then add all the new commands into the computer schedule (if they fit).
 
 		schedPath = "/scheduling/h-schedule.txt"
-		self.hSchedFile = open(schedPath, "wb+")
+		self.hSchedFile = open(schedPath, "ab+")
 		schedPath = "/scheduling/c-schedule.txt"
 		self.cSchedFile = open(schedPath, "wb+")
+
+		#The name of the file that contains the new schedule is located in self.currentCommand[144-0]
+		i = 0
+		fileName = None
+		while (self.currentCommand[i] != 0) and (i < 144):
+			fileName += str(self.currentCommand[i])
+
+		filePath = "/scheduling/new/" + fileName
+		newSchedFile = open(filePath, "rb")
 
 		numNewCommands = self.currentCommand[145]
 		if(self.numCommands + numNewCommands) > self.maxCommands:
@@ -224,8 +233,10 @@ class schedulingService(PUSService):
 		newCommandArray = []
 		newCommandArray[numNewCommands * 2] = numNewCommands
 		# Add the human commands into the computer schedule
-		self.hSchedFile.seek(0)
-		for line in self.hSchedFile:
+		self.newSchedFile.seek(0)
+		for line in self.newSchedFile:
+			# Put the command into the human schedule.
+			self.hSchedFile.write(line)
 			tempString = line.rstrip()
 			items = tempString.split()
 			# Get rid of the whitespace in each item from the schedule.
