@@ -215,14 +215,12 @@ class schedulingService(PUSService):
 		schedPath = "/scheduling/c-schedule.txt"
 		self.cSchedFile = open(schedPath, "wb+")
 
-		#The name of the file that contains the new schedule is located in self.currentCommand[144-0]
+		#The name of the file that contains the new schedule is located in self.currentCommand[0]
 		i = 0
-		fileName = None
-		while (self.currentCommand[i] != 0) and (i < 144):
-			fileName += str(self.currentCommand[i])
+		fileName = self.currentCommand[0]
 
 		filePath = "/scheduling/new/" + fileName
-		newSchedFile = open(filePath, "rb")
+		self.newSchedFile = open(filePath, "rb")
 
 		numNewCommands = self.currentCommand[145]
 		if(self.numCommands + numNewCommands) > self.maxCommands:

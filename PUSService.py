@@ -81,6 +81,17 @@ class PUSService(Process):
 	pauseScheduling			= 5
 	resumeScheduling		= 6
 	updatingSchedule		= 7
+	reprogramSSM			= 8
+	resetSSM				= 9
+	#FDIR Service
+	enterLowPowerMode		= 1
+	enterSafeMode			= 2
+	pauseSSMOperations		= 3
+	changeDiagDef			= 4
+	clearDiagDef			= 5
+	enableDiagParamReport	= 6
+	disableDiagParamReport	= 7
+	reportDiagDefinition	= 8
 	# Event Report ID
 	kickComFromSchedule		= 0x01
 	bitFlipDetected			= 0x02

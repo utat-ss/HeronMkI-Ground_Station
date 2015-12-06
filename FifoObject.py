@@ -42,7 +42,7 @@ class FifoObject:
     dataLength = 137
 
     @classmethod
-    def writeCommandToFifo(cls, commandArray):
+    def writeCommandToFifo(cls, commandArray, len=147):
         """
         @purpose:   This method takes what is contained in commandArray[] and
         then place it in the given fifo defined by this object.
@@ -51,7 +51,7 @@ class FifoObject:
         """
         if not cls.type:
             return -1           # Writing to a receiving Fifo is not allowed.
-        if len(commandArray) < 147:
+        if len(commandArray) < len:
             return -1           # Length of the given commandArray was too short.
 
         cls.writing = 1
@@ -65,7 +65,7 @@ class FifoObject:
         return 1
 
     @classmethod
-    def readCommandFromFifo(cls):
+    def readCommandFromFifo(cls, len=147):
         """
         @purpose:   This method reads a single line from the FIFO that this object represents and if an entire command
             has been received, it sets commandReady to 1.
@@ -91,7 +91,7 @@ class FifoObject:
             cls.clearTempCommand(cls)
             return 1
         if cls.reading and (s == "STOP\n"):
-            if cls.numLines != 147:
+            if cls.numLines != len:
                cls.reading  = 0
                return -2
             else:
@@ -101,8 +101,8 @@ class FifoObject:
             s = s.rstrip()
             cls.numLines += 1
             cls.tempCommand[cls.numLines - 1] = int(s)
-            if cls.numLines == 147:
-                for i in range(0, 147):
+            if cls.numLines == len:
+                for i in range(0, len):
                     cls.command[i] = cls.tempCommand[i]
                 cls.clearTempCommand(cls)
                 cls.commandReady = 1

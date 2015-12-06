@@ -146,9 +146,7 @@ class MemoryService(PUSService):
 		i = 145
 		x = 0
 		# Load the name of the file into fileName
-		while self.currentCommand[i]:
-			fileName += self.currentCommand[i]
-			i -= 1
+		fileName = self.currentCommand[0]
 
 		filePath = "/memory/load/" + fileName
 		fileToLoad = open(filePath, "rb")
