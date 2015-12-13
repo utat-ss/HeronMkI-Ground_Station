@@ -56,7 +56,7 @@ class PUSService(Process):
 	kService				= 69
 	fdirService 			= 70
 	# Definitions to clarify which service subtypes represent what
-	# HOUSEKEEPING
+	# HOUSEKEEPING/DIAGNOSTICS
 	newHKDefinition 		= 1
 	clearHKDefinition 		= 3
 	enableParamReport		= 5
@@ -64,6 +64,12 @@ class PUSService(Process):
 	reportHKDefinitions		= 9
 	hkDefinitionReport		= 10
 	hkReport 				= 25
+	changeDiagDef			= 2
+	clearDiagDef			= 4
+	enableDiagParamReport	= 7
+	disableDiagParamReport	= 8
+	reportDiagDefinition	= 11
+	diagReport 				= 26
 	# TIME
 	updateReportFreq		= 1
 	timeReport				= 2
@@ -83,15 +89,20 @@ class PUSService(Process):
 	updatingSchedule		= 7
 	reprogramSSM			= 8
 	resetSSM				= 9
-	#FDIR Service
+	#FDIR Service (diagnostics shall be performed by this process on the satellite)
 	enterLowPowerMode		= 1
-	enterSafeMode			= 2
-	pauseSSMOperations		= 3
-	changeDiagDef			= 4
-	clearDiagDef			= 5
-	enableDiagParamReport	= 6
-	disableDiagParamReport	= 7
-	reportDiagDefinition	= 8
+	exitLowPowerMode		= 2
+	enterSafeMode			= 3
+	exitSafeMode			= 4
+	enterComsTakeOverMode	= 5
+	exitComsTakeOverMode	= 6
+	pauseSSMOperations		= 7
+	resumeSSMOperations		= 8
+	reprogramSSM			= 9
+	resetSSM				= 10
+	resetTask				= 11
+	deleteTask				= 12
+
 	# Event Report ID
 	kickComFromSchedule		= 0x01
 	bitFlipDetected			= 0x02
