@@ -26,6 +26,8 @@ DEVELOPMENT HISTORY:
 
 11/20/2015			Added a couple class methods for sending and receiving commands
 					from a FIFO.
+
+01/22/2015			Updating PUS Service 'definitions' which are used on the OBC.
 """
 
 import os
@@ -64,6 +66,14 @@ class PUSService(Process):
 	reportHKDefinitions		= 9
 	hkDefinitionReport		= 10
 	hkReport 				= 25
+	# DIAGNOSTICS
+	newDiagDefinition		= 2
+	clearDiagDefinition		= 4
+	enableDParamReport		= 7
+	disableDParamReport		= 8
+	reportDiagDefinitions	= 11
+	diagDefinitionReport	= 12
+	diagReport				= 26
 	# TIME
 	updateReportFreq		= 1
 	timeReport				= 2
@@ -81,10 +91,62 @@ class PUSService(Process):
 	pauseScheduling			= 5
 	resumeScheduling		= 6
 	updatingSchedule		= 7
+	startExperimentArm		= 8
+	startExperimentFire		= 9
+	# FDIR
+	enterLowPowerMode		= 1
+	exitLowPowerMode		= 2
+	enterSafeMode			= 3
+	exitSafeMode			= 4
+	enterComsTakeoverMode	= 5
+	exitComsTakeoverMode	= 6
+	pauseSSMOperations		= 7
+	resumeSSMOperations		= 8
+	reprogramSSM			= 9
+	resetSSM				= 10
+	resetTask				= 11
+	deleteTask				= 12
 	# Event Report ID
 	kickComFromSchedule		= 0x01
 	bitFlipDetected			= 0x02
 	memoryWashFinished		= 0x03
+	allSPIMEMChipsDead		= 0x04
+	incUsageOfDecodeError	= 0x05
+	internalMemoryFallback	= 0x06
+	schedulingMalfunction	= 0x07
+	safeModeEntered			= 0x08
+	spi0MutexMalfunction	= 0x09
+	spiFailedInFdir			= 0x0A
+	schedCommandFailed		= 0x0B
+	errorInRestartTask		= 0x0C
+	errorInRS5				= 0x0D
+	errorInResetSSM			= 0x0E
+	dysfunctionalFifo		= 0x0F
+	fifoInfoLost			= 0x10
+	fifoErrorWithinFdir		= 0x11
+	importantFifoFailed		= 0x12
+	spimemErrorDuringInit	= 0x13
+	obcParamFailed			= 0x14
+	reqDataTimeoutTooLong	= 0x15
+	errorinCFS				= 0x16
+	ssmParamFailed			= 0x17
+	erSecTimeoutTooLong		= 0x18
+	erChipTimeoutTooLong	= 0x19
+	spimemInitFailed		= 0x1A
+	errorInGFS				= 0x1B
+	spimemFailInRTCInit		= 0x1C
+	spimemFailInMemWash		= 0x1D
+	ssmCttTooLong			= 0x1E
+	obcCttTooLong			= 0x1F
+	safeModeExited			= 0x20
+	canErrorWithinFdir		= 0x21
+	errorInDeleteTask		= 0x22
+	internalMemoryFallbackExited = 0x23
+	DiagErrorInFdir			= 0x24
+	DiagSpimemErrorInFdir	= 0x25
+	diagSensorErrorInFdir	= 0x26
+	tcBufferFull			= 0x27
+	tmBufferFull			= 0x28
 	hkgroundinitialized		= 0xFF
 	memgroundinitialized	= 0xFE
 	fdirgroundinitialized  	= 0xFD
