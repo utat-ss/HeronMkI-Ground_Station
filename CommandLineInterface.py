@@ -24,14 +24,16 @@ DEVELOPMENT HISTORY:
 11/28/2015			Created.
 
 """
+from FifoObject import *
+import os
 
 class CommandLineInterface():
     """
     This class is meant to represent the PUS FDIR Service.
     """
-    OBCToCLIFifo = None
-    CLIToOBCFifo = None
-    processID    = 0x16
+    GPRToCLIFifo    = None
+    CLIToGPRFifo    = None
+    processID       = 0x16
 
     @classmethod
     def run(cls):
@@ -42,16 +44,39 @@ class CommandLineInterface():
                     main program.
         """
         while 1:
-            commandString = raw_input("Enter a command / command file")
+            commandString = raw_input("Enter a command / command file: ")
             print("\nYou entered: %s\n" %commandString)
-            if commandString == "kill":
+            if cls.execCommands(cls, commandString) < 0:
                 return
+
+    @classmethod
+    def stop(cls):
+        try:
+            cls.GPRToCLIFifo.close()
+            cls.CLIToGPRFifo.close()
+        except:
+            pass
+        return
+
+    @staticmethod
+    def execCommands(self, command):
+        # If the user entered the command "kill", then we should halt the operation of the CLI.
+        if command == "kill":
+            self.CLIToGPRFifo.writeCommandToFifo(command, 1)
+            return -1
+        # Otherwise, we can simply forward the command which was just received to the GPR.
+        self.CLIToGPRFifo.writeCommandToFifo(command, 1)
+        return 1
 
     def __init__(self, path1, path2):
         # FIFOs for communication with the Ground Packet Router
-        self.GPRToCLIFifo 		= open(path1, "rb")
-        self.CLIToFPRFifo 		= open(path2, "wb")
+		# Inverse Parameter dictionary of the one shown above
+        self.currentPath        = os.path.dirname(os.path.realpath(__file__))
+        self.GPRToCLIFifo 		= FifoObject(self.currentPath + path1, 0)
+        self.CLIToGPRFifo 		= FifoObject(self.currentPath + path2, 1)
 
 if __name__ == '__main__':
-    CLI = CommandLineInterface("/fifos/GPRToCLI.fifo", "fifos/CLIToGPR.fifo")
+    CLI = CommandLineInterface("/fifos/GPRToCLI.fifo", "/fifos/CLIToGPR.fifo")
     CLI.run()
+    CLI.stop()
+    print("THE COMMAND LINE INTERFACE HAS STOPPED")

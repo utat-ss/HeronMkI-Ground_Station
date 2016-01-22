@@ -94,6 +94,7 @@ import os
 from multiprocessing import *
 from PUSService import *
 from datetime import *
+from FifoObject import *
 
 class schedulingService(PUSService):
 	"""
@@ -136,9 +137,10 @@ class schedulingService(PUSService):
 		self.initializePUS(self)
 		self.initialize(self)
 		while 1:
-			self.receiveCommandFromFifo(self.fifoFromGPR)
-			self.execCommands(self)
-			self.updateScheduleAutomatically(self)
+			self.fifoFromGPR.readCommandFromFifo()		# If command in FIFO, places it in self.currentCommand[]
+			if self.fifofromFDIR.commandReady:
+				self.execCommands(self)								# Deals with commands from GPR
+				self.fifofromFDIR.commandReady = 0
 		return
 
 	@staticmethod
@@ -209,9 +211,16 @@ class schedulingService(PUSService):
 		# This method will then add all the new commands into the computer schedule (if they fit).
 
 		schedPath = "/scheduling/h-schedule.txt"
-		self.hSchedFile = open(schedPath, "wb+")
+		self.hSchedFile = open(schedPath, "ab+")
 		schedPath = "/scheduling/c-schedule.txt"
 		self.cSchedFile = open(schedPath, "wb+")
+
+		#The name of the file that contains the new schedule is located in self.currentCommand[0]
+		i = 0
+		fileName = self.currentCommand[0]
+
+		filePath = "/scheduling/new/" + fileName
+		self.newSchedFile = open(filePath, "rb")
 
 		numNewCommands = self.currentCommand[145]
 		if(self.numCommands + numNewCommands) > self.maxCommands:
@@ -222,8 +231,10 @@ class schedulingService(PUSService):
 		newCommandArray = []
 		newCommandArray[numNewCommands * 2] = numNewCommands
 		# Add the human commands into the computer schedule
-		self.hSchedFile.seek(0)
-		for line in self.hSchedFile:
+		self.newSchedFile.seek(0)
+		for line in self.newSchedFile:
+			# Put the command into the human schedule.
+			self.hSchedFile.write(line)
 			tempString = line.rstrip()
 			items = tempString.split()
 			# Get rid of the whitespace in each item from the schedule.
@@ -805,14 +816,13 @@ class schedulingService(PUSService):
 	@staticmethod
 	def initializePUS(self):
 		# FIFOs Required for communication with the Ground Packet Router:
-		self.fifoFromGPR			= open(self.p2, "rb", 0)
-		#os.mkfifo(self.p1)
-		self.fifoToGPR				= open(self.p1, "wb")
+		self.fifoFromGPR			= FifoObject(self.p2, 0)
+		self.fifoToGPR				= FifoObject(self.p1, 1)
 		self.fifoToGPRPath			= self.p1
 		self.wait					= 1
 		self.fifoFromGPRPath		= self.p2
-		self.createAndOpenFifoToFDIR()
-		self.openFifoFromFDIR()
+		self.fifotoFDIR				= FifoObject(self.FDIROutPath, 1)
+		self.fifofromFDIR			= FifoObject(self.FDIRInPath, 0)
 		return
 
 	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock,

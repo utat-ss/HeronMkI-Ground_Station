@@ -155,7 +155,9 @@ class Puspacket:
         """
         @purpose: Initialization method for the Ground Packet Router Class
         """
-        pass
+        for i in range(0, 152):
+            self.data.append(0)
+            self.appData.append(0)
 
 if __name__ == '__main__':
     pass

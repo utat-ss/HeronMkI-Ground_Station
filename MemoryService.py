@@ -21,14 +21,14 @@ NOTES:
 			and /memory/dump for files that you want satellite memory to be download to.
 		2. The first line shall contain the memoryID on the satellite that you want to write to.
 			0 == OBC Main memory. 1 == EXternal SPI Memory.
-		2. The second line of the file shall contain the absolute starting address in the 
+		3. The second line of the file shall contain the absolute starting address in the
 			satellite's memory that you wish to load/dump at. NOTE: That the address should
 			be listed in hexadecimal ex: 0x00000000, or 0x12345678
-		3. The third line of the file shall contain the number of INTEGERS you want to load.
-		4. The remainder of the file shall be each INTEGER that you wish to load into the. (use decimal notation here)
+		4. The third line of the file shall contain the number of INTEGERS you want to load.
+		5. The remainder of the file shall be each INTEGER that you wish to load into the. (use decimal notation here)
 			satellite's memory, followed by a newline character after each.
-		5. Do not place an empty line at the end of the file.
-		6. The first Integer to be loaded to into satellite memory is on line 4.
+		6. Do not place an empty line at the end of the file.
+		7. The first Integer to be loaded to into satellite memory is on line 4.
 
 		To execute a memory load / dump, you may use the specified CLI command or command
 		file followed by the filename you placed in /memory/.. (filename should include the extension)
@@ -53,6 +53,7 @@ import os
 from multiprocessing import *
 from PUSService import *
 from datetime import *
+from FifoObject import *
 
 class MemoryService(PUSService):
 	"""
@@ -86,8 +87,10 @@ class MemoryService(PUSService):
 		self.initializePUS(self)
 		self.initialize(self)
 		while 1:
-			self.receiveCommandFromFifo(self.fifoFromGPR)		# If command in FIFO, places it in self.currentCommand[]
-			self.execCommands(self)								# Deals with commands from GPR
+			self.fifoFromGPR.readCommandFromFifo()		# If command in FIFO, places it in self.currentCommand[]
+			if self.fifofromFDIR.commandReady:
+				self.execCommands(self)								# Deals with commands from GPR
+				self.fifofromFDIR.commandReady = 0
 		return				# This should never be reached.
 
 	@staticmethod
@@ -102,14 +105,13 @@ class MemoryService(PUSService):
 	@staticmethod
 	def initializePUS(self):
 		# FIFOs Required for communication with the Ground Packet Router:
-		self.fifoFromGPR			= open(self.p2, "rb", 0)
-		#os.mkfifo(self.p1)
-		self.fifoToGPR				= open(self.p1, "wb")
+		self.fifoFromGPR			= FifoObject(self.p2, 0)
+		self.fifoToGPR				= FifoObject(self.p1, 1)
 		self.fifoToGPRPath			= self.p1
 		self.wait					= 1
 		self.fifoFromGPRPath		= self.p2
-		self.createAndOpenFifoToFDIR()
-		self.openFifoFromFDIR()
+		self.fifotoFDIR				= FifoObject(self.FDIROutPath, 1)
+		self.fifofromFDIR			= FifoObject(self.FDIRInPath, 0)
 		return
 
 	@staticmethod
@@ -144,9 +146,7 @@ class MemoryService(PUSService):
 		i = 145
 		x = 0
 		# Load the name of the file into fileName
-		while self.currentCommand[i]:
-			fileName += self.currentCommand[i]
-			i -= 1
+		fileName = self.currentCommand[0]
 
 		filePath = "/memory/load/" + fileName
 		fileToLoad = open(filePath, "rb")

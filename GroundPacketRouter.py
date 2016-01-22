@@ -53,6 +53,7 @@ from FDIRService import *
 from MemoryService import *
 from SchedulingService import *
 from PUSPacket import *
+from FifoObject import *
 from datetime import datetime
 from multiprocessing import *
 from sys import executable
@@ -104,6 +105,20 @@ class groundPacketRouter(Process):
 	clearSchedule			= 2
 	schedReportRequest		= 3
 	schedReport 			= 4
+	pauseScheduling			= 5
+	resumeScheduling		= 6
+	updatingSchedule		= 7
+	reprogramSSM			= 8
+	resetSSM				= 9
+	#FDIR Service
+	enterLowPowerMode		= 1
+	enterSafeMode			= 2
+	pauseSSMOperations		= 3
+	changeDiagDef			= 4
+	clearDiagDef			= 5
+	enableDiagParamReport	= 6
+	disableDiagParamReport	= 7
+	reportDiagDefinition	= 8
 	# Event Report ID
 	kickComFromSchedule		= 0x01
 	bitFlipDetected			= 0x02
@@ -157,6 +172,8 @@ class groundPacketRouter(Process):
 	GPRTomemFifo			= None
 	fdirToGPRFifo			= None
 	GPRTofdirFifo			= None
+	schedToGPRFifo			= None
+	GPRToschedFifo			= None
 	# Subsidiary services are attributes to this class
 	hkGroundService			= None
 	memoryGroundService		= None
@@ -184,6 +201,31 @@ class groundPacketRouter(Process):
 	resumeScheduleCount		= 0
 	currentPath				= None
 
+	commandTable={
+		# Housekeeping Commands
+		"CHANGE_HK_DEFINITION"      :   0x31,
+		"CLEAR_HK_DEFINITION"       :   0x33,
+		"ENABLE_PARAM_REPORT"       :   0x35,
+		"DISABLE_PARAM_REPORT"      :   0x36,
+		"REPORT_DEFINITIONS"        :   0x39,
+		# Memory Management Commands
+		"MEMORY_LOAD"               :   0x62,
+		"DUMP_REQUEST"              :   0x65,
+		"CHECK_MEMORY"              :   0x69,
+		# Scheduling Commands
+		"ADD_SCHEDULE"              :   0x691,
+		"CLEAR_SCHEDULE"            :   0x692,
+		"REQUEST_SCHEDULE_REPORT"   :   0x693,
+		# K-Service
+		"REPROGRAM_SSM"             :   0x698,
+		"RESET_SSM"                 :   0x699,
+		# FDIR
+		"ENTER_LOW_POWER_MODE"      :   0x701,
+		"ENTER_SAFE_MODE"           :   0x702,
+		"PAUSE_SSM_OPERATIONS"      :	0x703
+	}
+	invCommandTable = None
+
 	@classmethod
 	def run(cls):
 		"""
@@ -191,7 +233,7 @@ class groundPacketRouter(Process):
 		"""
 		cls.initialize(cls)
 
-		os.system("gnome-terminal --disable-factory -e {python CommandLineInterface.py}")
+		#os.system("gnome-terminal --disable-factory -e {python CommandLineInterface.py}")
 		while 1:
 			response = raw_input("Enter something to kill this process")
 			if response:
@@ -243,11 +285,12 @@ class groundPacketRouter(Process):
 		path4 = self.currentPath + "/fifos/FDIRtohk.fifo"
 		path5 = self.currentPath + "/fifos/FDIRtomem.fifo"
 		path6 = self.currentPath + "/fifos/FDIRtosched.fifo"
-		# Create the required FIFOs for the CLI
-		os.mkfifo(self.currentPath + "/fifos/GPRToCLI.fifo")
-		#self.GPRToCLIFifo = open(self.currentPath + "/fifos/GPRToCLI.fifo", "w")
-		os.mkfifo(self.currentPath + "/fifos/CLIToGPR.fifo")
-		#self.CLIToGPRFifo = open(self.currentPath + "/fifos/CLIToGPR.fifo", "r")
+		os.mkfifo(path1)
+		os.mkfifo(path2)
+		os.mkfifo(path3)
+		os.mkfifo(path4)
+		os.mkfifo(path5)
+		os.mkfifo(path6)
 		# Create all the files required for logging
 		self.eventLog = None
 		self.hkLog = None
@@ -302,7 +345,7 @@ class groundPacketRouter(Process):
 		self.FDIRGround 			= FDIRService(self.currentPath + "/fifos/fdirToGPR.fifo", self.currentPath + "/fifos/GPRtofdir.fifo", path1, path2, path3,
 											path4, path5, path6, self.fdirTCLock, eventPath, hkPath, errorPath,
 											self.eventLock, self.hkLock, self.cliLock, self.errorLock, self.absTime.day,
-											self.absTime.minute, self.absTime.minute, self.absTime.second)
+											self.absTime.hour, self.absTime.minute, self.absTime.second)
 
 		print("HK PID: %s" %str(self.hkGroundService.pID))
 		print("mem PID: %s" %str(self.memoryGroundService.pID))
@@ -310,22 +353,29 @@ class groundPacketRouter(Process):
 		print("FDIR PID: %s" %str(self.FDIRGround.pID))
 
 		# Open all the FIFOs TO the subsidiary services for writing
-		self.GPRTohkFifo = open(self.currentPath + "/fifos/GPRtohk.fifo", "wb")
-		self.GPRTomemFifo = open(self.currentPath + "/fifos/GPRtomem.fifo", "wb")
-		self.GPRTofdirFifo = open(self.currentPath + "/fifos/GPRtofdir.fifo", "wb")
-		self.GPRtoschedFifo = open(self.currentPath + "/fifos/GPRtosched.fifo", "wb")
-
+		self.GPRTohkFifo = FifoObject(self.currentPath + "/fifos/GPRtohk.fifo", 1)
+		self.GPRTomemFifo = FifoObject(self.currentPath + "/fifos/GPRtomem.fifo", 1)
+		self.GPRTofdirFifo = FifoObject(self.currentPath + "/fifos/GPRtofdir.fifo", 1)
+		self.GPRToschedFifo = FifoObject(self.currentPath + "/fifos/GPRtosched.fifo", 1)
 		# Open all the FIFOs for receiving information from the PUS services, (created by them as well)
-		self.hkToGPRFifo = open(self.currentPath + "/fifos/hkToGPR.fifo", "rb", 0)
-		self.memToGPRFifo = open(self.currentPath + "/fifos/memToGPR.fifo", "rb", 0)
-		self.fdirToGPRFifo = open(self.currentPath + "/fifos/fdirToGPR.fifo", "rb", 0)
-		self.schedToGPRFifo = open(self.currentPath + "/fifos/schedToGPR.fifo", "rb", 0)
-
+		self.hkToGPRFifo = FifoObject(self.currentPath + "/fifos/hkToGPR.fifo", 0)
+		self.memToGPRFifo = FifoObject(self.currentPath + "/fifos/memToGPR.fifo", 0)
+		self.fdirToGPRFifo = FifoObject(self.currentPath + "/fifos/fdirToGPR.fifo", 0)
+		self.schedToGPRFifo = FifoObject(self.currentPath + "/fifos/schedToGPR.fifo", 0)
 		# These are the actual Linux process IDs of the services which were just created.
 		self.HKPID = self.hkGroundService.pid
 		self.memPID = self.memoryGroundService.pid
 		self.FDIRPID = self.FDIRGround.pid
 		self.schedPID = self.schedulingGround.pid
+		# Create stuff for communication with the CommandLineInterface
+		self.invCommandTable    = {v : k for k,v in self.commandTable.items()}
+		# Create the required FIFOs for the CLI
+		os.mkfifo(self.currentPath + "/fifos/GPRToCLI.fifo")
+		#self.GPRToCLIFifo = open(self.currentPath + "/fifos/GPRToCLI.fifo", "w")
+		os.mkfifo(self.currentPath + "/fifos/CLIToGPR.fifo")
+		#self.CLIToGPRFifo = open(self.currentPath + "/fifos/CLIToGPR.fifo", "r")
+		self.GPRtoCLIFifo = FifoObject(cls.currentPath + "/fifos/GPRToCLI.fifo", 1)
+		self.CLIToGPRFifo = FifoObject(cls.currentPath + "/fifos/CLIToGPR.fifo", 0)
 		return
 
 	@staticmethod
@@ -516,13 +566,10 @@ class groundPacketRouter(Process):
 		@purpose:   This method is takes what is contained in currentCommand[] and
 		then place it in the given fifo "fifo".
 		We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
-		Each subquesequent byte is then placed in the fifo followed by a newline character.
+		Each subsequent byte is then placed in the fifo followed by a newline character.
+		@param:		fifo: an instance of the FifoObject class.
 		"""
-		fifo.write("START\n")
-		for i in range(0, self.dataLength + 10):
-			tempString = str(self.currentCommand[i]) + "\n"
-			fifo.write(tempString)
-		fifo.write("STOP\n")
+		fifo.writeCommandToFifo(self.currentCommand)
 		return
 
 	@staticmethod
@@ -637,34 +684,23 @@ class groundPacketRouter(Process):
 		cls.GPRTomemFifo.close()
 		cls.fdirToGPRFifo.close()
 		cls.GPRTofdirFifo.close()
-		# Kill all the children
-		if cls.hkGroundService.is_alive():
-			cls.hkGroundService.terminate()
-		if cls.memoryGroundService.is_alive():
-			cls.memoryGroundService.terminate()
-		if cls.FDIRGround.is_alive():
-			cls.FDIRGround.terminate()
-		if cls.schedulingGround.as_alive():
-			cls.schedulingGround.terminate()
-
 		# Delete all the FIFO files that were created
-		os.remove(self.currentPath + "/fifos/hkToGPR.fifo")
-		os.remove(self.currentPath + "/fifos/GPRtohk.fifo")
-		os.remove(self.currentPath + "/fifos/memToGPR.fifo")
-		os.remove(self.currentPath + "/fifos/GPRtomem.fifo")
-		os.remove(self.currentPath + "/fifos/GPRtomem.fifo")
-		os.remove(self.currentPath + "/fifos/fdirToGPR.fifo")
-		os.remove(self.currentPath + "/fifos/GPRtofdir.fifo")
-		os.remove(self.currentPath + "/fifos/GPRTosched.fifo")
-		os.remove(self.currentPath + "/fifos/schedToGPR.fifo")
-		os.remove(self.currentPath + "/fifos/hktoFDIR.fifo")
-		os.remove(self.currentPath + "/fifos/memtoFDIR.fifo")
-		os.remove(self.currentPath + "/fifos/schedtoFDIR.fifo")
-		os.remove(self.currentPath + "/fifos/FDIRtohk.fifo")
-		os.remove(self.currentPath + "/fifos/FDIRtomem.fifo")
-		os.remove(self.currentPath + "/fifos/FDIRtosched.fifo")
-		os.remove(self.currentPath + "/fifos/CLIToGPR.fifo")
-		os.remove(self.currentPath + "/fifos/GPRToCLI.fifo")
+		os.remove(cls.currentPath + "/fifos/hkToGPR.fifo")
+		os.remove(cls.currentPath + "/fifos/GPRtohk.fifo")
+		os.remove(cls.currentPath + "/fifos/memToGPR.fifo")
+		os.remove(cls.currentPath + "/fifos/GPRtomem.fifo")
+		os.remove(cls.currentPath + "/fifos/fdirToGPR.fifo")
+		os.remove(cls.currentPath + "/fifos/GPRtofdir.fifo")
+		os.remove(cls.currentPath + "/fifos/GPRtosched.fifo")
+		os.remove(cls.currentPath + "/fifos/schedToGPR.fifo")
+		os.remove(cls.currentPath + "/fifos/hktoFDIR.fifo")
+		os.remove(cls.currentPath + "/fifos/memtoFDIR.fifo")
+		os.remove(cls.currentPath + "/fifos/schedtoFDIR.fifo")
+		os.remove(cls.currentPath + "/fifos/FDIRtohk.fifo")
+		os.remove(cls.currentPath + "/fifos/FDIRtomem.fifo")
+		os.remove(cls.currentPath + "/fifos/FDIRtosched.fifo")
+		os.remove(cls.currentPath + "/fifos/CLIToGPR.fifo")
+		os.remove(cls.currentPath + "/fifos/GPRToCLI.fifo")
 		return
 
 	@staticmethod
@@ -701,7 +737,16 @@ class groundPacketRouter(Process):
 	@staticmethod
 	def execCommands(self):
 		self.clearCurrentCommand()
-		if self.receiveCommandFromFifo(self.hkToGPRFifo) > 0:
+		self.hkToGPRFifo.readCommandFromFifo()
+		self.memToGPRFifo.readCommandFromFifo()
+		self.schedToGPRFifo.readCommandFromFifo()
+		self.fdirToGPRFifo.readCommandFromFifo()
+
+		if self.hkToGPRFifo.commandReady:
+			for i in range(0, 147):
+				self.currentCommand[i] = self.hkToGPRFifo.command[i]
+			self.hkToGPRFifo.commandReady = 0
+
 			if self.currentCommand[146] == self.clearHKDefinition:
 				self.clearHKCount += 1
 				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.clearHKDefinition,
@@ -722,7 +767,10 @@ class groundPacketRouter(Process):
 				self.requestDefReportCount += 1
 				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.reportHKDefinitions,
 											  self.requestDefReportCount, 1, self.currentCommand)
-		if self.receiveCommandFromFifo(self.memToGPRFifo) > 0:
+		if self.memToGPRFifo.commandReady:
+			for i in range(0, 147):
+				self.currentCommand[i] = self.memToGPRFifo.command[i]
+			self.memToGPRFifo.commandReady = 0
 			if self.currentCommand[146] == self.memoryLoadABS:
 				self.memoryLoadCount += 1
 				self.packetizeSendTelecommand(self.MemGroundID, self.MemoryTaskID, self.memService, self.memoryLoadABS,
@@ -735,10 +783,16 @@ class groundPacketRouter(Process):
 				self.checkMemCount += 1
 				self.packetizeSendTelecommand(self.MemGroundId, self.MemoryTaskID, self.memService, self.checkMemRequest,
 											  self.checkMemCount, 1, self.currentCommand)
-		if self.receiveCommandFromFifo(self.fdirToGPRFifo) > 0:
+		if self.fdirToGPRFifo.commandReady:
 			# Deal with incoming commands from the FDIR task
+			for i in range(0, 147):
+				self.currentCommand[i] = self.fdirToGPRFifo.command[i]
+			self.fdirToGPRFifo.commandReady = 0
 			pass
-		if self.receiveCommandFromFifo(self.schedToGPRFifo) > 0:
+		if self.schedToGPRFifo.commandReady:
+			for i in range(0, 147):
+				self.currentCommand[i] = self.schedToGPRFifo.command[i]
+			self.schedToGPRFifo.commandReady = 0
 			if self.currentCommand[146] == self.addSchedule:
 				self.addScheduleCount += 1
 				self.packetizeSendTelecommand(self.SchedGroundId, self.SchedulingTaskID, self.kService, self.addSchedule,
@@ -837,6 +891,111 @@ class groundPacketRouter(Process):
 		return
 
 	@staticmethod
+	def checkCLI(self):
+		self.CLIToGPRFifo.readCommandFromFifo(1)
+		if self.CLIToGPRFifo.commandReady:
+			self.clearCurrentCommand()
+			command = self.CLIToGPRFifo.command[0]	# There should only be one line here anyways.
+			commandItems = command.split()
+			commandID = self.invCommandTable[commandItems[0]] & 0x01
+			serviceType = self.invCommandTable[commandItems[0]] >> 1
+			if serviceType == self.hkService:
+				if commandID == self.newHKDefinition:
+					self.currentCommand[146] = self.newHKDefinition
+					self.GPRTohkFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.clearHkDefinition:
+					self.currentCommand[146] = self.clearHKDefinition
+					self.GPRTohkFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.enableParamReport:
+					self.currentCommand[146] = self.enableParamReport
+					self.GPRTohkFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.disableParamReport:
+					self.currentCommand[146] = self.disableParamReport
+					self.GPRTohkFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.reportHKDefinitions:
+					self.currentCommand[146] = self.reportHKDefinitions
+					self.GPRTohkFifo.writeCommandToFifo(self.currentCommand)
+			if serviceType == self.memService:
+				if commandID == self.memoryLoadABS:
+					self.currentCommand[146] = self.memoryLoadABS
+					self.currentCommand[0] = commandItems[1]		# Should be a file name
+					self.GPRTomemFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.dumpRequestABS:
+					self.currentCommand[146] = self.dumpRequestABS
+					memoryID 	= int(commandItems[1])
+					address		= int(commandItems[2], 16)
+					length		= int(commandItems[3], 16)
+					self.currentCommand[136] = memoryID
+					self.currentCommand[135] = (address & 0xFF000000) >> 24
+					self.currentCommand[134] = (address & 0x00FF0000) >> 16
+					self.currentCommand[133] = (address & 0x0000FF00) >> 8
+					self.currentCommand[132] = address & 0x000000FF
+					self.currentCommand[131] = (length & 0xFF000000) >> 24
+					self.currentCommand[130] = (length & 0x00FF0000) >> 16
+					self.currentCommand[129] = (length & 0x0000FF00) >> 8
+					self.currentCommand[128] = length & 0x000000FF
+					self.GPRTomemFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.checkMemRequest:
+					self.currentCommand[146] = self.checkMemRequest
+					memoryID 	= int(commandItems[1])
+					address		= int(commandItems[2], 16)
+					length		= int(commandItems[3], 16)
+					self.currentCommand[136] = memoryID
+					self.currentCommand[135] = (address & 0xFF000000) >> 24
+					self.currentCommand[134] = (address & 0x00FF0000) >> 16
+					self.currentCommand[133] = (address & 0x0000FF00) >> 8
+					self.currentCommand[132] = address & 0x000000FF
+					self.currentCommand[131] = (length & 0xFF000000) >> 24
+					self.currentCommand[130] = (length & 0x00FF0000) >> 16
+					self.currentCommand[129] = (length & 0x0000FF00) >> 8
+					self.currentCommand[128] = length & 0x000000FF
+					self.GPRTomemFifo.writeCommandToFifo(self.currentCommand)
+			if serviceType == self.kService:
+				if commandID == self.addSchedule:
+					self.currentCommand[146] = self.addSchedule
+					self.currentCommand[0] = commandItems[1]	# Should be a filename
+					self.GPRToschedFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.clearSchedule:
+					self.currentCommand[146] = self.clearSchedule
+					self.GPRToschedFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.schedReportRequest:
+					self.currentCommand[146] = self.schedReportRequest
+					self.GPRToschedFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.pauseScheduling:
+					self.currentCommand[146] = self.pauseScheduling
+					self.GPRToschedFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.resumeScheduling:
+					self.currentCommand[146] = self.resumeScheduling
+					self.GPRToschedFifo.writeCommandToFifo(self.currentCommand)
+			if serviceType == self.fdirService:
+				if commandID == self.enterLowPowerMode:
+					self.currentCommand[146] = self.enterLowPowerMode
+					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.enterSafeMode:
+					self.currentCommand[146] = self.enterSafeMode
+					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.pauseSSMOperations:
+					self.currentCommand[146] = self.pauseSSMOperations
+					self.currentCommand[0] = commandItems[1]
+					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.changeDiagDef:
+					self.currentCommand[146] = self.changeDiagDef
+					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.clearDiagDef:
+					self.currentCommand[146] = self.clearDiagDef
+					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.enableDiagParamReport:
+					self.currentCommand[146] = self.enableDiagParamReport
+					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.disableDiagParamReport:
+					self.currentCommand[146] = self.disableDiagParamReport
+					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.reportDiagDefinition:
+					self.currentCommand[146] = self.reportDiagDefinition
+					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
+		return
+
+	@staticmethod
 	def sendPusPacketTC(self):
 		# To be implemented later.
 		pass
@@ -868,28 +1027,6 @@ class groundPacketRouter(Process):
 			self.currentCommand.append(0)
 		return
 
-	@staticmethod
-	def receiveCommandFromFifo(self, fifo):
-		"""
-		@purpose:   This method takes a command from the the fifo "fifo" which should have a
-		length of 147 bytes & places it into the array self.currentCommand[].
-		@Note: We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
-		"""
-		self.clearCurrentCommand()
-		if os.path.getsize(fifo) > 152:
-			i = 0
-			if fifo.readline() == "START\n":
-				# Start reading in the command.
-				newString = fifo.readline()
-				newString = newString.rstrip()
-				while (newString != "STOP") and (i < (self.dataLength + 11)):
-					self.currentCommand[i] = int(newString)
-					newString = fifo.readline()
-					newString = newString.rstrip()
-					i += 1
-				return 1
-		return -1
-
 	def __init__(self):
 		"""
 		@purpose: Initialization method for the Ground Packet Router Class
@@ -901,3 +1038,4 @@ class groundPacketRouter(Process):
 if __name__ == '__main__':
 	x = groundPacketRouter()
 	x.run()
+	x.stop()

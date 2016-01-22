@@ -106,6 +106,7 @@ class PUSService(Process):
 	resetSSM				= 10
 	resetTask				= 11
 	deleteTask				= 12
+
 	# Event Report ID
 	kickComFromSchedule		= 0x01
 	bitFlipDetected			= 0x02
@@ -271,6 +272,16 @@ class PUSService(Process):
 		return
 
 	@classmethod
+	def initCommandByteCountLists(cls):
+		"""
+		@purpose:   Clears the lists commandByteCount[], openFifoList[]
+		@Note:		Each element in this list corresponds to the byteCount of a different FIFO's incoming command
+		"""
+		for i in range(0, 20):
+			cls.commandLineCount.append(0)
+		return
+
+	@classmethod
 	def logEventReport(self, severity, reportID, param1, param0, message=None):
 		"""
 		@purpose: This method writes a event report to the event log.
@@ -342,49 +353,15 @@ class PUSService(Process):
 		return
 
 	@classmethod
-	def sendCurrentCommandToFifo(self, fifo):
+	def sendCurrentCommandToFifo(cls, fifo):
 		"""
 		@purpose:   This method is takes what is contained in currentCommand[] and
 		then place it in the given fifo "fifo".
 		@Note: We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
 		@Note: Each subsequent byte is then placed in the fifo followed by a newline character.
+		@param:		fifo: an instance of the FifoObject class.
 		"""
-		fifo.write("START\n")
-		for i in range(0, self.dataLength + 10):
-			tempString = str(self.currentCommand[i]) + "\n"
-			fifo.write(tempString)
-		fifo.write("STOP\n")
-		return
-
-	@classmethod
-	def receiveCommandFromFifo(self, fifo):
-		"""
-		@purpose:   This method takes a command from the the fifo "fifo" which should have a
-		length of 147 bytes & places it into the array self.currentCommand[].
-		@Note: We use a "START\n" code and "STOP\n" code to indicate where commands stop and start.
-		"""
-		if os.path.getsize(fifo) > 152:
-			i = 0
-			if fifo.readline() == "START\n":
-				# Start reading in the command.
-				newString = fifo.readline()
-				newString = newString.rstrip()
-				while (newString != "STOP") and (i < (self.dataLength + 11)):
-					self.currentCommand[i] = int(newString)
-					newString = fifo.readline()
-					newString = newString.rstrip()
-					i += 1
-		return
-
-	@classmethod
-	def createAndOpenFifoToFDIR(cls):
-		os.mkfifo(cls.FDIROutPath)
-		cls.fifotoFDIR = open(cls.FDIROutPath, "wb")
-		return
-
-	@classmethod
-	def openFifoFromFDIR(cls):
-		cls.fifofromFDIR = open(cls.FDIRInPath, "rb")
+		fifo.writeCommandToFifo(cls.currentCommand)
 		return
 
 	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second):
@@ -419,4 +396,3 @@ class PUSService(Process):
 
 if __name__ == '__main__':
 	pass
-

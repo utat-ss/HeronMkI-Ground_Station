@@ -28,6 +28,7 @@ DEVELOPMENT HISTORY:
 import os
 from multiprocessing import *
 from PUSService import *
+from FifoObject import *
 
 class FDIRService(PUSService):
 	"""
@@ -57,28 +58,28 @@ class FDIRService(PUSService):
 		print("The path in fdir run: %s" %str(self.p1))
 		self.initializePUS(self)
 		self.initialize()
+		while 1:
+			pass
 
 	@classmethod
 	def initialize(cls):
 		# FIFOs for communication with the FDIR service
-		cls.hktoFDIRFifo 		= open(cls.path3, "rb")
-		cls.memtoFDIRFifo 		= open(cls.path4, "rb")
-		cls.schedtoFDIRFifo 	= open(cls.path5, "rb")
-		cls.FDIRtohkFifo		= open(cls.path6, "wb")
-		cls.FDIRtomemFifo		= open(cls.path7, "wb")
-		cls.FDIRtoschedFifo		= open(cls.path8, "wb")
+		cls.hktoFDIRFifo		= FifoObject(cls.path3, 0)
+		cls.memtoFDIRFifo		= FifoObject(cls.path4, 0)
+		cls.schedtoFDIRFifo		= FifoObject(cls.path5, 0)
+		cls.FDIRtohkFifo		= FifoObject(cls.path6, 1)
+		cls.FDIRtomemFifo		= FifoObject(cls.path7, 1)
+		cls.FDIRtoschedFifo		= FifoObject(cls.path8, 1)
 		return
 
 	@staticmethod
 	def initializePUS(self):
 		# FIFOs Required for communication with the Ground Packet Router:
-		self.fifoFromGPR			= open(self.p2, "rb", 0)
-		#os.mkfifo(self.p1)
-		self.fifoToGPR				= open(self.p1, "wb")
+		self.fifoFromGPR			= FifoObject(self.p2, 0)
+		self.fifoToGPR				= FifoObject(self.p1, 1)
 		self.fifoToGPRPath			= self.p1
 		self.wait					= 1
 		self.fifoFromGPRPath		= self.p2
-		self.createAndOpenFifoToFDIR()
 		return
 
 	def __init__(self, path1, path2, path3, path4, path5, path6, path7, path8, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second):
