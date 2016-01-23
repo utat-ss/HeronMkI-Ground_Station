@@ -168,6 +168,9 @@ class PUSService(Process):
 	scheduleCleared			= 0xEE
 	schedCommandCompleted   = 0xED
 	numCommandsWrong		= 0xEC
+	diagParamIncorrect		= 0xEB
+	diagIntervalIncorrect	= 0xEA
+	diagNumParamsIncorrect  = 0xE9
 	# IDs for Communication:
 	comsID					= 0x00
 	epsID					= 0x01

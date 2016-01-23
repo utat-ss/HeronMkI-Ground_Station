@@ -1,7 +1,7 @@
 """
 FILE_NAME:			HKService.py
 
-AUTHOR:				Keenan Burnett
+AUTHOR:				Keenan Burnett, Bill Bateman
 
 PURPOSE:			This class shall house the housekeeping PUS service and all related methods.
 
@@ -28,6 +28,9 @@ DEVELOPMENT HISTORY:
 
 					Other than waiting for TC Aceptance verification, I believe this
 					service is mostly done now.
+
+1/23/2016			Bill: Adding in diagnostics functions.
+
 """
 
 import os
@@ -55,6 +58,26 @@ class hkService(PUSService):
 	numVars1 				= 14
 	# Log for Housekeeping Parameter Reports
 	hkDefLog 				= None
+
+
+	#DIAGNOSTICS ATTRIBUTES
+	currentDiag				= []
+	diagDefinition0			= []
+	diagDefinition2			= []
+	currentDiagDefinition	= []
+	currentDiagDefinitionf	= 0
+	diagCollectionInterval0 = 15	#Diagnostics collection interval in minutes (default is 15)
+	diagCollectionInterval1 = 15
+	diagNumParameters0		= 41
+	diagNumSensors0			= 27
+	diagNumVars0			= 14
+	diagNumParameters1		= 41
+	diagNumSensors1			= 27
+	diagNumVars1			= 14
+	# Logs for diagnostics
+	diagLog 				= None
+	diagDefLog				= None
+
 	# FIFOs for communication with the FDIR service
 	fifotoFDIR 				= None
 	fifofromFDIR 			= None
@@ -63,7 +86,13 @@ class hkService(PUSService):
 		0X03		:	"CLEAR HK DEFINITION",
 		0x05		:	"ENABLE PARAM REPORT",
 		0X06		:	"DISABLE PARAM REPORT",
-		0X09 		:	"REPORT HK DEFINITION"
+		0X09 		:	"REPORT HK DEFINITION",
+
+		0x02		: 	"ALTERNATE DIAG DEFINITION",
+		0x04		: 	"CLEAR DIAG DEFINITION",
+		0x07		: 	"ENABLE DIAG PARAM REPORT",
+		0x08		: 	"DISABLE DIAG PARAM REPORT",
+		0x0B		: 	"REPORT DIAG DEFINITION"
 	}
 
 	@staticmethod
@@ -135,8 +164,217 @@ class hkService(PUSService):
 			self.disableParamReport()
 		if self.currentCommand[146] == self.reportHKDefinitions:
 			self.requestHKParamReport()
+
+		#DIAGNOSTICS
+		if self.currentCommand[146] == self.diagDefinitionReport:
+			self.logDiagnosticsDefinitionReport()
+		if self.currentCommand[146] == self.diagReport:
+			self.logDiagnosticsReport()
+		if self.currentCommand[146] == self.newDiagDefinition:
+			self.setAlternateDiagDefinition()
+		if self.currentCommand[146] == self.clearDiagDefinition:
+			self.setDiagnosticsDefinitionsDefault()
+		if self.currentCommand[146] == self.enableDiagParamReport:
+			self.enableDiagParamReport()
+		if self.currentCommand[146] == self.disableDiagParamReport:
+			self.disableDiagParamReport()
+		if self.currentCommand[146] == self.reportDiagDefinitions:
+			self.requestDiagParamReport()
+
 		self.clearCurrentCommand()
 		return
+
+
+	### DIAGNOSTICS METHODS ###
+
+	@staticmethod
+	def logDiagnosticsDefinitionReport(self):
+		"""
+		@purpose:   Used to log a diagnostics parameter report.
+		@Note:		We simply use the parameter report which should be stored in currentCommand[]
+					at this point.
+		"""
+		sID = self.currentCommand[self.dataLength - 1]
+		diagCollectionInterval = self.currentCommand[145]
+		diagNumParameters = self.currentCommand[144]
+		if sID != self.currentDiagDefinitionf:
+			self.logError("Local Diagnostics Parameter definition does not match satellite")
+			self.currentCommand[146] = self.diagParamIncorrect
+			self.currentCommand[146] = 3
+			self.sendCurrentCommandToFifo(self.fifotoFDIR)
+		if sID:
+			if diagCollectionInterval != self.diagCollectionInterval1:
+				self.logError("Local diagnostics collection Interval definition does not match satellite")
+				self.currentCommand[146] = self.diagIntervalIncorrect
+				self.currentCommand[146] = 3
+				self.sendCurrentCommandToFifo(self.fifotoFDIR)
+			if diagNumParameters != self.numParameters1:
+				self.logError("Local Diagnostics number of parameters does not match satellite")
+				self.currentCommand[146] = self.diagNumParamsIncorrect
+				self.currentCommand[146] = 3
+				self.sendCurrentCommandToFifo(self.fifotoFDIR)
+		if not sID:
+			if diagCollectionInterval != self.collectionInterval0:
+				self.logError("Local HK collection Interval definition does not match satellite")
+				self.currentCommand[146] = self.diagIntervalIncorrect
+				self.currentCommand[146] = 3
+				self.sendCurrentCommandToFifo(self.fifotoFDIR)
+			if diagNumParameters != self.numParameters0:
+				self.logError("Local Diagnostics number of parameters does not match satellite")
+				self.currentCommand[146] = self.diagNumParamsIncorrect
+				self.currentCommand[146] = 3
+				self.sendCurrentCommandToFifo(self.fifotoFDIR)
+
+
+		self.diagDefLog.write("DIAG PARAMETER REPORT:\t")
+		self.diagDefLog.write(str(self.absTime.day) + "/" + str(self.absTime.day) + "/" + str(self.absTime.day) + "\t,\n")
+		for i in range(diagNumParameters - 1, -1, -1):
+			byte = self.currentCommand[i] & 0x000000FF
+			tempString = self.parameters(byte)
+			if not sID:
+				self.diagDefLog.write(tempString + "\n")
+			if sID:
+				self.diagDefLog.write(tempString + "\n")
+		return
+
+	@staticmethod
+	def logDiagnosticsReport(self):
+		"""
+		@purpose:   Used to log the diagnostics report which was received.
+		@Note:		Contains a mutex lock for exclusive access.
+		@Note:		Diagnostics reports are created in a manner that is more convenient
+					for excel or Matlab to parse but not really that great for human consumption.
+		@Note:		Each parameter in a diagnostics report gets 2 entries in the array,
+					which corresponds to being 16 bits on the satellite.
+		@Note:		We expect diagnostics report to located in currentCommand[] at this point.
+		"""
+		if self.currentDiagDefinitionf:
+			diagNumParameters = self.diagNumParameters1
+		else:
+			diagNumParameters = self.diagNumParameters0
+
+		self.diagLog.write("DIAGLOG:\t")
+		self.diagLog.write(str(self.absTime.day) + "/" + str(self.absTime.day) + "/" + str(self.absTime.day) + "\t,\t")
+		for i in range(diagNumParameters * 2 - 1, -1, -2):
+			param = self.currentCommand[i] << 8
+			param += self.currentCommand[i - 1]
+			self.diagLog.write(str(param) + "\t,\t")
+		self.diagLog.write("\n")
+		return
+
+	@staticmethod
+	def setAlternateDiagDefinition(self):
+		"""
+		@purpose:   Sets the diag definition which is being used to the alternate definition.
+		@Note:		The format of diag definitions should be known before changing the existing one.
+		@Note:		The new diagnostics parameter report should replace diagDefinition1.txt & have an sID of 1.
+		"""
+		defPath = "/housekeeping/definitions/diagDefinition1.txt"
+		if os.path.exists(defPath):
+			diagdef = open(defPath, "rb")
+			sID = int(diagdef.read(1))
+			if sID != 1:
+				self.printtoCLI("sID in diagDefinition1.txt was not 1, denying definition update")
+				self.logError("sID in diagDefinition1.txt was not 1, denying definition update\n")
+				return
+			self.diagDefinition1[136] = 1
+			diagdef.seek(1)
+			self.diagCollectionInterval1 = int(diagdef.read(2))
+			self.diagDefinition1[135] = self.diagCollectionInterval1
+			diagdef.seek(2)
+			diagNmParameters1 = int(diagdef.read(2))
+			if diagNmParameters1 > 64:
+				self.logError("Proposed alternate diagnostics definition has numParameters > 64, denying definition update\n")
+				return
+			self.diagNumParameters1 = diagNmParameters1
+			self.diagDefinition1[134] = self.diagNumParameters1
+			diagdef.seek(3)
+			# Read the diagnostics definition from the file.
+			for i in range((self.diagNumParameters1 * 2 - 1 ), 0, -1):
+				tempString = diagdef.readline()
+				tempString = tempString.rstrip()
+				paramNum = int(self.invParameters(tempString))
+				self.diagDefinition1[i] = paramNum
+
+			# Send a PUS Packet to the satellite setting the diag def to the alternate one
+			self.clearCurrentCommand()
+			self.currentCommand[146] = self.newDiagDefinition
+			for i in range(0, self.dataLength):
+				self.currentCommand[i] = self.diagDefinition1[i]
+			self.sendCurrentCommandToFifo(self.fifotoGPR)
+			self.waitForTCVerification(5000, self.newDiagDefinition)
+			# Send a PUS packet to the satellite requesting a parameter report
+			self.requestDiagParamReport()
+			return
+
+		else:
+			self.printtoCLI("diagDefinition1.txt does not exist, denying definition update")
+			self.logError("diagDefinition1.txt does not exist, denying definition update\n")
+		return
+
+	@staticmethod
+	def setDiagnosticsDefinitionsDefault(self):
+		"""
+		@purpose:   Sets the diagnostics definition which is being used to the default.
+		@Note:		For default, parameters are stored in the diagnostic definition in decreasing order for variables
+					followed by increasing order for sensors (starting at diagDefinition[numParameters - 1] and descending)
+		@Note:		Note: If the satellite experiences a reset, it will go back to this definition for diagnostics.
+		"""
+		paramNum = 0xFF
+		self.diagDefinition0[136] 	= 0
+		self.diagDefinition0[135] 	= self.diagCollectionInterval0
+		self.diagDefinition0[134] 	= self.diagNumParameters0
+		for i in range(0, self.diagNumVars0):
+			self.diagDefinition0[i] = paramNum - i
+		paramNum = 1
+		for i in range (self.diagNumVars0, self.diagNumParameters0):
+			self.diagDefinition0[i] = paramNum
+			paramNum += 1
+		self.currentDiagDefinitionf = 0
+		defPath = "/housekeeping/definitions/diagDefinition0.txt"
+
+		# Create the hkDefinition0.txt file if it doesn't exist yet.
+		if not os.path.exists(defPath):
+			diagdef = open(defPath, "ab")
+			diagdef.write(str(0))
+			diagdef.write(str(self.diagCollectionInterval0))
+			diagdef.write(str(self.diagNumParameters0))
+			for i in range((self.diagNumParameters0 * 2 - 1 ), 0, -1):
+				paramNum = self.diagDefinition0[i]
+				diagdef.write(self.parameters[paramNum])
+
+		# Send a PUS Packet to the satellite setting the diag def to default (clearDiagDefinition)
+		self.clearCurrentCommand()
+		self.currentCommand[146] = self.clearDiagDefinition
+		self.sendCurrentCommandToFifo(self.fifotoGPR)
+		# Send a PUS packet to the satellite requesting a parameter report
+		self.requestDiagParamReport()
+		return
+
+	@staticmethod
+	def enableDiagParamReport(self):
+		self.clearCurrentCommand()
+		self.currentCommand[146] = self.enableDiagParamReport
+		self.sendCurrentCommandToFifo(self.fifoToGPR)
+		return
+
+	@staticmethod
+	def disableDiagParamReport(self):
+		self.clearCurrentCommand()
+		self.currentCommand[146] = self.disableDiagParamReport
+		self.sendCurrentCommandToFifo(self.fifoToGPR)
+		return
+
+	@staticmethod
+	def requestDiagParamReport(self):
+		self.clearCurrentCommand()
+		self.clearCurrentCommand[146] = self.reportDiagDefinitions
+		self.sendCurrentCommandToFifo(self.fifoToGPR)
+		return
+
+
+	### HOUSEKEEPING METHODS ###
+
 	@staticmethod
 	def enableParamReport(self):
 		self.clearCurrentCommand()
@@ -196,15 +434,15 @@ class hkService(PUSService):
 				self.currentCommand[146] = 3
 				self.sendCurrentCommandToFifo(self.fifotoFDIR)
 
-		self.hkLog.write("HK PARAMETER REPORT:\t")
-		self.hkLog.write(str(self.absTime.day) + "/" + str(self.absTime.day) + "/" + str(self.absTime.day) + "\t,\n")
+		self.hkDefLog.write("HK PARAMETER REPORT:\t")
+		self.hkDefLog.write(str(self.absTime.day) + "/" + str(self.absTime.day) + "/" + str(self.absTime.day) + "\t,\n")
 		for i in range(numParameters - 1, -1, -1):
 			byte = self.currentCommand[i] & 0x000000FF
 			tempString = self.parameters(byte)
 			if not sID:
-				self.hkLog.write(tempString + "\n")
+				self.hkDefLog.write(tempString + "\n")
 			if sID:
-				self.hkLog.write(tempString + "\n")
+				self.hkDefLog.write(tempString + "\n")
 		return
 
 	@staticmethod
@@ -268,7 +506,7 @@ class hkService(PUSService):
 		# Send a PUS Packet to the satellite setting the hk def to default (clearHKDefinition)
 		self.clearCurrentCommand()
 		self.currentCommand[146] = self.clearHKDefinition
-		self.sendCurrentCommandToFifo(self.fifotoFDIR)
+		self.sendCurrentCommandToFifo(self.fifotoGPR)
 		# Send a PUS packet to the satellite requesting a parameter report
 		self.requestHKParamReport()
 		return
@@ -312,7 +550,7 @@ class hkService(PUSService):
 			self.currentCommand[146] = self.newHKDefinition
 			for i in range(0, self.dataLength):
 				self.currentCommand[i] = self.hkDefinition1[i]
-			self.sendCurrentCommandToFifo(self.fifotoFDIR)
+			self.sendCurrentCommandToFifo(self.fifotoGPR)
 			self.waitForTCVerification(5000, self.newHKDefinition)
 			# Send a PUS packet to the satellite requesting a parameter report
 			self.requestHKParamReport()
@@ -350,7 +588,7 @@ class hkService(PUSService):
 			self.tcLock.release()
 			return 1
 
-	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second, hkDefPath):
+	def __init__(self, path1, path2, path3, path4, tcLock, eventPath, hkPath, errorPath, eventLock, hkLock, cliLock, errorLock, day, hour, minute, second, hkDefPath, diagPath, diagDefPath):
 		# Initialize this instance as a PUS service
 		print(path1)
 		self.p1 = path1
@@ -359,8 +597,11 @@ class hkService(PUSService):
 		self.processID = 0x10
 		self.serviceType = 3
 
-		# Log for Housekeeping Parameter Reports
+		# Log for Housekeeping Parameter Reports & diagnostics
 		self.hkDefLog = open(hkDefPath, "a+")
+		self.diagLog = open(diagPath, "a+")
+		self.diagDefLog = open(diagDefPath, "a+")
+
 		print("The path before forking: %s" %str(self.p1))
 		pID = os.fork()
 		if pID:
