@@ -454,7 +454,7 @@ class groundPacketRouter(Process):
 				self.FDIRGround.tcAcceptVerification = (verificationPacketID << 16) & verificationPSC
 				self.fdirTCLock.release()
 		if (self.serviceSubType == 2) or (self.serviceSubType == 8):				# Tc verification is a failure type.
-			self.logEventReport(2, self.TMExecutionFailed, 0, 0, "Telecommand Execution Failed. for PacketID: %s, PSC: %s" %str(verificationPacketID) % str(verificationPSC))
+			self.logEventReport(2, self.TMExecutionFailed, 0, "Telecommand Execution Failed. for PacketID: %s, PSC: %s" %str(verificationPacketID) % str(verificationPSC))
 			self.currentCommand[146] = self.TMExecutionFailed
 			self.currentCommand[146] = 3
 			self.sendCurrentCommandToFifo(self.GPRTofdirFifo)		# Alert FDIR that something is going wrong.
@@ -568,7 +568,7 @@ class groundPacketRouter(Process):
 		incomDay = self.currentCommand[0]
 		incomHour = self.currentCommand[1]
 		incomMinute = self.currentCommand[2]
-		self.logEventReport(1, self.timeReportReceived, 0, 0, "Time Report Received. D: %s H: %s M: %s" %str(incomDay) %incomHour %incomMinute)
+		self.logEventReport(1, self.timeReportReceived, 0, "Time Report Received. D: %s H: %s M: %s" %str(incomDay) %incomHour %incomMinute)
 		incomAbsMinutes = (incomDay * 24 * 60) + (incomHour * 60) + incomMinute
 		localAbsMinutes = (self.absTime.day * 24 * 60) + (self.absTime.hour * 60) + self.absTime.minute
 
@@ -700,7 +700,7 @@ class groundPacketRouter(Process):
 			self.logError("TM PacketID: %s, PSC: %s had an incorrect packet version" %str(currentPacket.packetID) %str(currentPacket.psc))
 			return -1
 
-		self.logEventReport(1, self.incomTMSuccess, 0, 0, "Incoming Telemetry Packet Succeeded")
+		self.logEventReport(1, self.incomTMSuccess, 0, "Incoming Telemetry Packet Succeeded")
 		return 1
 
 	@classmethod
