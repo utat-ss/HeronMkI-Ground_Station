@@ -543,12 +543,11 @@ class groundPacketRouter(Process):
 		@purpose:   This function stores the received event in the eventLog. If there was an error,
 					then this function will send an alert to FDIRGround for it to deal with the issue.
 		"""
-		severity = self.currentCommand[3]
-		reportID = self.currentCommand[2]
-		p1 = self.currentCommand[1]
-		p0 = self.currentCommand[0]
+		severity = self.serviceSubType
+		reportID = self.currentCommand[136]
+		numParams = self.currentCommand[135]
 
-		self.logEventReport(severity, reportID, p1, p0, "Satellite event report received.")
+		self.logEventReport(severity, reportID, numParams, "Satellite event report received.")
 		# If the event report was a failure, forward it to the FDIR task.
 		if self.serviceSubType > 1:
 			self.currentCommand[146] = reportID
@@ -733,7 +732,7 @@ class groundPacketRouter(Process):
 		return
 
 	@staticmethod
-	def logEventReport(self, severity, reportID, param1, param0, message=None):
+	def logEventReport(self, severity, reportID, numParams, message=None):
 		"""
 		@purpose: This method writes a event report to the event log.
 		@param: severity: 1 = Normal, 2-4 = different levels of failure
@@ -754,8 +753,12 @@ class groundPacketRouter(Process):
 		self.eventLog.write(tempString)
 		self.eventLog.write(str(self.absTime.day) + "/" + str(self.absTime.hour) + "/" + str(self.absTime.minute) + "\t,\t")
 		self.eventLog.write(str(reportID) + "\t,\t")
-		self.eventLog.write(str(param1) + "\t,\t")
-		self.eventLog.write(str(param0) + "\t,\t")
+		for i in range(0,numParams):
+			temp = int(self.currentCommand[134 - (i * 4)]) << 24
+			temp += int(self.currentCommand[134 - (i * 4) - 1]) << 16
+			temp += int(self.currentCommand[134 - (i * 4) - 1]) << 8
+			temp += int(self.currentCommand[134 - (i * 4) - 1])
+			self.eventLog.write(str(hex(temp)) + "\t,\t")
 		if message is not None:
 			self.eventLog.write(str(message) + "\n")
 		if message is None:
