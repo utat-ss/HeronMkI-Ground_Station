@@ -91,6 +91,14 @@ class groundPacketRouter(Process):
 	reportHKDefinitions		= 9
 	hkDefinitionReport		= 10
 	hkReport 				= 25
+	# DIAGNOSTICS
+	newDiagDefinition		= 2 #BILL - Updating the Diagnostics commands and putting them here
+	clearDiagDefinition		= 4
+	enableDiagParamReport	= 7
+	disableDiagParamReport	= 8
+	reportDiagDefinitions	= 11
+	diagDefinitionReport	= 12
+	diagReport				= 26
 	# TIME
 	updateReportFreq		= 1
 	timeReport				= 2
@@ -114,11 +122,6 @@ class groundPacketRouter(Process):
 	enterLowPowerMode		= 1
 	enterSafeMode			= 2
 	pauseSSMOperations		= 3
-	changeDiagDef			= 4
-	clearDiagDef			= 5
-	enableDiagParamReport	= 6
-	disableDiagParamReport	= 7
-	reportDiagDefinition	= 8
 	# Event Report ID
 	kickComFromSchedule		= 0x01
 	bitFlipDetected			= 0x02
@@ -201,6 +204,13 @@ class groundPacketRouter(Process):
 	resumeScheduleCount		= 0
 	currentPath				= None
 
+	requestDiagDefReportCount = 0
+	enableDiagParamCount	  = 0
+	disableDiagParamCount	  = 0
+	clearDiagCount			  = 0
+	newDiagCount			  = 0
+
+
 	commandTable={
 		# Housekeeping Commands
 		"CHANGE_HK_DEFINITION"      :   0x31,
@@ -208,6 +218,12 @@ class groundPacketRouter(Process):
 		"ENABLE_PARAM_REPORT"       :   0x35,
 		"DISABLE_PARAM_REPORT"      :   0x36,
 		"REPORT_DEFINITIONS"        :   0x39,
+		# Diagnostics Commands (Hk subsystem)
+		"CHANGE_DIAG_DEFINITION"	: 	0x32,
+		"CLEAR_DIAG_DEFINITION"     :   0x34,
+		"ENABLE_DIAG_PARAM_REPORT"  :   0x37,
+		"DISABLE_DIAG_PARAM_REPORT" :   0x38,
+		"REPORT_DIAG_DEFINITIONS"   :   0x3B,
 		# Memory Management Commands
 		"MEMORY_LOAD"               :   0x62,
 		"DUMP_REQUEST"              :   0x65,
@@ -296,6 +312,8 @@ class groundPacketRouter(Process):
 		self.hkLog = None
 		self.hkDefLog = None
 		self.errorLog = None
+		self.diagLog = None
+		self.diagDefLog = None
 		print(self.currentTime.month)
 		print(self.currentTime.day)
 		eventPath = self.currentPath + "/events/eventLog%s.csv" %(str(self.currentTime.month) + str(self.currentTime.day))
@@ -318,6 +336,17 @@ class groundPacketRouter(Process):
 			self.errorLog = open(errorPath, "rb+")
 		else:
 			self.errorLog = open(errorPath, "wb")
+		diagPath = self.currentPath + "/housekeeping/logs/diagLog%s.csv" %(str(self.currentTime.month) + str(self.currentTime.day))
+		if os.path.exists(diagPath):
+			self.diagLog = open(diagPath, "rb+")
+		else:
+			self.diagLog = open(diagPath, "wb")
+		diagDefPath = self.currentPath + "/housekeeping/logs/diagDefLog%s.csv" %(str(self.currentTime.month) + str(self.currentTime.day))
+		if os.path.exists(diagDefPath):
+			self.diagDefLog = open(diagDefPath, "rb+")
+		else:
+			self.diagDefLog - open(diagDefPath, "wb")
+
 
 		# Create Mutex locks for accessing logs and printing to the CLI.
 		self.hkLock 		= Lock()
@@ -333,7 +362,7 @@ class groundPacketRouter(Process):
 		self.hkGroundService 		= hkService(self.currentPath + "/fifos/hkToGPR.fifo", self.currentPath + "/fifos/GPRtohk.fifo", path1, path4,
 											self.hkTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
 											self.cliLock, self.errorLock, self.absTime.day, self.absTime.hour,
-											self.absTime.minute, self.absTime.second, hkDefPath)
+											self.absTime.minute, self.absTime.second, hkDefPath, diagPath, diagDefPath)
 		self.memoryGroundService 	= MemoryService(self.currentPath + "/fifos/memToGPR.fifo", self.currentPath + "/fifos/GPRtomem.fifo", path2, path5,
 											self.memTCLock, eventPath, hkPath, errorPath, self.eventLock, self.hkLock,
 											self.cliLock, self.errorLock, self.absTime.day, self.absTime.hour,
@@ -425,7 +454,7 @@ class groundPacketRouter(Process):
 				self.FDIRGround.tcAcceptVerification = (verificationPacketID << 16) & verificationPSC
 				self.fdirTCLock.release()
 		if (self.serviceSubType == 2) or (self.serviceSubType == 8):				# Tc verification is a failure type.
-			self.logEventReport(2, self.TMExecutionFailed, 0, 0, "Telecommand Execution Failed. for PacketID: %s, PSC: %s" %str(verificationPacketID) % str(verificationPSC))
+			self.logEventReport(2, self.TMExecutionFailed, 0, "Telecommand Execution Failed. for PacketID: %s, PSC: %s" %str(verificationPacketID) % str(verificationPSC))
 			self.currentCommand[146] = self.TMExecutionFailed
 			self.currentCommand[146] = 3
 			self.sendCurrentCommandToFifo(self.GPRTofdirFifo)		# Alert FDIR that something is going wrong.
@@ -514,12 +543,11 @@ class groundPacketRouter(Process):
 		@purpose:   This function stores the received event in the eventLog. If there was an error,
 					then this function will send an alert to FDIRGround for it to deal with the issue.
 		"""
-		severity = self.currentCommand[3]
-		reportID = self.currentCommand[2]
-		p1 = self.currentCommand[1]
-		p0 = self.currentCommand[0]
+		severity = self.serviceSubType
+		reportID = self.currentCommand[136]
+		numParams = self.currentCommand[135]
 
-		self.logEventReport(severity, reportID, p1, p0, "Satellite event report received.")
+		self.logEventReport(severity, reportID, numParams, "Satellite event report received.")
 		# If the event report was a failure, forward it to the FDIR task.
 		if self.serviceSubType > 1:
 			self.currentCommand[146] = reportID
@@ -540,7 +568,7 @@ class groundPacketRouter(Process):
 		incomDay = self.currentCommand[0]
 		incomHour = self.currentCommand[1]
 		incomMinute = self.currentCommand[2]
-		self.logEventReport(1, self.timeReportReceived, 0, 0, "Time Report Received. D: %s H: %s M: %s" %str(incomDay) %incomHour %incomMinute)
+		self.logEventReport(1, self.timeReportReceived, 0, "Time Report Received. D: %s H: %s M: %s" %str(incomDay) %incomHour %incomMinute)
 		incomAbsMinutes = (incomDay * 24 * 60) + (incomHour * 60) + incomMinute
 		localAbsMinutes = (self.absTime.day * 24 * 60) + (self.absTime.hour * 60) + self.absTime.minute
 
@@ -672,7 +700,7 @@ class groundPacketRouter(Process):
 			self.logError("TM PacketID: %s, PSC: %s had an incorrect packet version" %str(currentPacket.packetID) %str(currentPacket.psc))
 			return -1
 
-		self.logEventReport(1, self.incomTMSuccess, 0, 0, "Incoming Telemetry Packet Succeeded")
+		self.logEventReport(1, self.incomTMSuccess, 0, "Incoming Telemetry Packet Succeeded")
 		return 1
 
 	@classmethod
@@ -704,7 +732,7 @@ class groundPacketRouter(Process):
 		return
 
 	@staticmethod
-	def logEventReport(self, severity, reportID, param1, param0, message=None):
+	def logEventReport(self, severity, reportID, numParams, message=None):
 		"""
 		@purpose: This method writes a event report to the event log.
 		@param: severity: 1 = Normal, 2-4 = different levels of failure
@@ -725,8 +753,12 @@ class groundPacketRouter(Process):
 		self.eventLog.write(tempString)
 		self.eventLog.write(str(self.absTime.day) + "/" + str(self.absTime.hour) + "/" + str(self.absTime.minute) + "\t,\t")
 		self.eventLog.write(str(reportID) + "\t,\t")
-		self.eventLog.write(str(param1) + "\t,\t")
-		self.eventLog.write(str(param0) + "\t,\t")
+		for i in range(0,numParams):
+			temp = int(self.currentCommand[134 - (i * 4)]) << 24
+			temp += int(self.currentCommand[134 - (i * 4) - 1]) << 16
+			temp += int(self.currentCommand[134 - (i * 4) - 1]) << 8
+			temp += int(self.currentCommand[134 - (i * 4) - 1])
+			self.eventLog.write(str(hex(temp)) + "\t,\t")
 		if message is not None:
 			self.eventLog.write(str(message) + "\n")
 		if message is None:
@@ -767,6 +799,28 @@ class groundPacketRouter(Process):
 				self.requestDefReportCount += 1
 				self.packetizeSendTelecommand(self.HKGroundID, self.hkTaskID, self.hkService, self.reportHKDefinitions,
 											  self.requestDefReportCount, 1, self.currentCommand)
+			#DIAGNOSTICS
+			if self.currentCommand[146] == self.clearDiagDefinition:
+				self.clearDiagCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.FDIRTaskID, self.hkService, self.clearDiagDefinition,
+											  self.clearDiagCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.newDiagDefinition:
+				self.newDiagCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.FDIRTaskID, self.hkService, self.newDiagDefinition,
+											  self.newDiagCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.enableDiagParamReport:
+				self.enableDiagParamCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.FDIRTaskID, self.hkService, self.enableDiagParamReport,
+											  self.enableDiagParamCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.disableParamReport:
+				self.disableDiagParamCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.FDIRTaskID, self.hkService, self.disableParamReport,
+											  self.disableDiagParamCount, 1, self.currentCommand)
+			if self.currentCommand[146] == self.reportDiagDefinitions:
+				self.requestDiagDefReportCount += 1
+				self.packetizeSendTelecommand(self.HKGroundID, self.FDIRTaskID, self.hkService, self.reportDiagDefinitions,
+											  self.requestDiagDefReportCount, 1, self.currentCommand)
+
 		if self.memToGPRFifo.commandReady:
 			for i in range(0, 147):
 				self.currentCommand[i] = self.memToGPRFifo.command[i]
@@ -897,8 +951,8 @@ class groundPacketRouter(Process):
 			self.clearCurrentCommand()
 			command = self.CLIToGPRFifo.command[0]	# There should only be one line here anyways.
 			commandItems = command.split()
-			commandID = self.invCommandTable[commandItems[0]] & 0x01
-			serviceType = self.invCommandTable[commandItems[0]] >> 1
+			commandID = self.invCommandTable[commandItems[0]] & 0x0F
+			serviceType = self.invCommandTable[commandItems[0]] >> 4
 			if serviceType == self.hkService:
 				if commandID == self.newHKDefinition:
 					self.currentCommand[146] = self.newHKDefinition
@@ -915,6 +969,23 @@ class groundPacketRouter(Process):
 				if commandID == self.reportHKDefinitions:
 					self.currentCommand[146] = self.reportHKDefinitions
 					self.GPRTohkFifo.writeCommandToFifo(self.currentCommand)
+				#DIAGNOSTICS
+				if commandID == self.newDiagDefinition:
+					self.currentCommand[146] = self.newDiagDefinition
+					self.GPRTohkFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.clearDiagDefinition:
+					self.currentCommand[146] = self.clearDiagDefinition
+					self.GPRTohkFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.enableDiagParamReport:
+					self.currentCommand[146] = self.enableDiagParamReport
+					self.GPRTohkFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.disableDiagParamReport:
+					self.currentCommand[146] = self.disableDiagParamReport
+					self.GPRTohkFifo.writeCommandToFifo(self.currentCommand)
+				if commandID == self.reportDiagDefinitions:
+					self.currentCommand[146] = self.reportDiagDefinitions
+					self.GPRTohkFifo.writeCommandToFifo(self.currentCommand)
+
 			if serviceType == self.memService:
 				if commandID == self.memoryLoadABS:
 					self.currentCommand[146] = self.memoryLoadABS
@@ -977,21 +1048,6 @@ class groundPacketRouter(Process):
 				if commandID == self.pauseSSMOperations:
 					self.currentCommand[146] = self.pauseSSMOperations
 					self.currentCommand[0] = commandItems[1]
-					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
-				if commandID == self.changeDiagDef:
-					self.currentCommand[146] = self.changeDiagDef
-					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
-				if commandID == self.clearDiagDef:
-					self.currentCommand[146] = self.clearDiagDef
-					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
-				if commandID == self.enableDiagParamReport:
-					self.currentCommand[146] = self.enableDiagParamReport
-					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
-				if commandID == self.disableDiagParamReport:
-					self.currentCommand[146] = self.disableDiagParamReport
-					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
-				if commandID == self.reportDiagDefinition:
-					self.currentCommand[146] = self.reportDiagDefinition
 					self.GPRTofdirFifo.writeCommandToFifo(self.currentCommand)
 		return
 
