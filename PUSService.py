@@ -169,7 +169,7 @@ class PUSService(Process):
 		0x0E	:			'PAY_I',
 		0x0F	:			'OBC_V',
 		0x10	:			'OBC_I',
-		0x11	:			'BATT_I',
+		0x11	:			'SHUNT_DPOT',
 		0x12	:			'COMS_TEMP',
 		0x13	:			'OBC_TEMP',
 		0x14	:			'PAY_TEMP0',
