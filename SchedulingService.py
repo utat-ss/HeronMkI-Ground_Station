@@ -88,6 +88,11 @@ DEVELOPMENT HISTORY:
 11/27/2015			I'm adding a new state for the commands in the human schedule - "W" - which stands for "waiting",
 					meaning we've sent the command to the satellite and are waiting on the completion.
 
+1/26/2016			I'm trying to make more of the commands schedulable via the scheduling task, as such the way in
+					which 'commands' are to be used in the future is going to change. From this point forward, the
+					first 4 bits of the command will correspond to the service_type (except for FDIR which is not supported
+					and K-Service shall simply take a zero as the first 4 bits) The last 4 bits shall be the sub-type.
+
 """
 
 import os

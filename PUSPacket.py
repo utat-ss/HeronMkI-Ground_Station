@@ -127,14 +127,14 @@ class Puspacket:
             cls.data[i + 2] = cls.appData[i]
         # Next fill in the packet header and data field header with the given attributes
         # Packet Header
-        cls.data[151]   =   ((cls.version & 0x07) << 5) | ((cls.type1 & 0x01) << 4) | ((cls.ccsdsFlag & 0x01) << 3)
+        cls.data[151]   =   ((cls.version & 0x07) << 5) | ((cls.type1 & 0x01) << 4) | 0x08
         cls.data[150]   =   cls.sender
         cls.data[149]   =   (cls.sequenceFlags & 0x03) << 6
         cls.data[148]   =   cls.sequenceCount
         cls.data[147]   =   0x00
         cls.data[146]   =   cls.packetLength - 1
         # Data Field Header
-        cls.data[145]   =   cls.version & 0x07 << 4
+        cls.data[145]   =   ((cls.version & 0x07) << 5) | (1 << 4) | 0x09
         cls.data[144]   =   cls.serviceType
         cls.data[143]   =   cls.serviceSubType
         cls.data[142]   =   cls.packetSubCounter
